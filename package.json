@@ -5,6 +5,7 @@
 	"type": "module",
 	"scripts": {
 		"app": "./scripts/dev.sh",
+		"bulk-load": "bun run scripts/bulk-load.ts",
 		"dev": "vite dev",
 		"build": "vite build",
 		"preview": "vite preview",
