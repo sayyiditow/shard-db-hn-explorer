@@ -38,7 +38,7 @@
 	--r-lg: 8px;
 
 	/* Layout */
-	--page-max: 880px;
+	--page-max: 1200px;
 }
 
 @media (prefers-color-scheme: dark) {
