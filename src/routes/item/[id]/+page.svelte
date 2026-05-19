@@ -124,7 +124,7 @@
 	}
 
 	.thread > :global(.comment.depth-0) {
-		padding: var(--s-3) 0;
+		padding: var(--s-2) 0;
 		border-top: 1px solid var(--c-border);
 		border-left: 0;
 		padding-left: 0;
