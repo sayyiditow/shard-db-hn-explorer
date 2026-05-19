@@ -1,8 +1,12 @@
-/** Display helpers for HN items. Server- and client-safe. */
+/** Display helpers for HN items. Server- and client-safe.
+ *
+ *  Time fields throughout the schema are stored as Unix epoch
+ *  **milliseconds** via shard-db's `timestamp` type, matching JS
+ *  Date semantics directly — no per-call ms↔s conversion. */
 
 /** "3 hours ago", "2 days ago", "just now" — coarse-grained, good enough for a list. */
-export function relativeTime(unixSeconds: number, now: Date = new Date()): string {
-	const deltaSec = Math.max(0, Math.floor(now.getTime() / 1000 - unixSeconds));
+export function relativeTime(unixMs: number, now: Date = new Date()): string {
+	const deltaSec = Math.max(0, Math.floor((now.getTime() - unixMs) / 1000));
 	if (deltaSec < 60) return 'just now';
 	if (deltaSec < 3600) return `${Math.floor(deltaSec / 60)}m ago`;
 	if (deltaSec < 86400) return `${Math.floor(deltaSec / 3600)}h ago`;
@@ -12,9 +16,9 @@ export function relativeTime(unixSeconds: number, now: Date = new Date()): strin
 }
 
 /** Exact yyyy-mm-dd hh:mm for tooltips / "absolute time on hover" */
-export function absoluteTime(unixSeconds: number): string {
-	if (!unixSeconds) return '';
-	const d = new Date(unixSeconds * 1000);
+export function absoluteTime(unixMs: number): string {
+	if (!unixMs) return '';
+	const d = new Date(unixMs);
 	return d.toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
 }
 

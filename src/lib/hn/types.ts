@@ -1,9 +1,14 @@
-/** Canonical record shapes returned by shard-db's `find` mode. */
+/** Canonical record shapes returned by shard-db's `find` mode.
+ *
+ *  All `time` / `created` fields are stored as `timestamp` —
+ *  Unix epoch **milliseconds**, matching JS `Date` natively.
+ *  Conversion from HN's Firebase API (which returns seconds) is
+ *  handled by `scripts/sample-load.ts` and `scripts/delta-refresh.ts`. */
 
 export interface Story {
 	key: string;        // HN id as decimal string
 	by: string;
-	time: number;       // unix seconds
+	time: number;       // unix ms
 	score: number;
 	url: string;
 	title: string;
@@ -16,7 +21,7 @@ export interface Story {
 export interface Comment {
 	key: string;
 	by: string;
-	time: number;
+	time: number;       // unix ms
 	parent: number;
 	story_root: number;
 	text: string;       // raw HN-format HTML
@@ -27,7 +32,7 @@ export interface Comment {
 export interface UserProfile {
 	key: string;        // username
 	karma: number;
-	created: number;
+	created: number;    // unix ms
 	about: string;
 	submitted_count: number;
 }

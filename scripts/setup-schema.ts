@@ -49,9 +49,9 @@ async function main() {
 		max_key: 12,
 		fields: [
 			'by:varchar:32',
-			'time:int',
+			'time:timestamp',           // HN epoch seconds * 1000 = ms
 			'score:int',
-			'url:varchar:512',
+			'url:varchar:2048',         // bumped from 512 — HN URLs with tracking params
 			'title:varchar:512',
 			'descendants:int',
 			'type:varchar:8',
@@ -69,10 +69,10 @@ async function main() {
 		max_key: 12,
 		fields: [
 			'by:varchar:32',
-			'time:int',
+			'time:timestamp',           // ms; converted from HN seconds at insert
 			'parent:int',
 			'story_root:int',
-			'text:varchar:8192',
+			'text:varchar:32768',       // bumped from 8192 — long-form HN comments do exist
 			'deleted:bool',
 			'dead:bool'
 		],
@@ -85,7 +85,12 @@ async function main() {
 		object: 'users',
 		splits: 32,
 		max_key: 32,
-		fields: ['karma:int', 'created:int', 'about:varchar:4096', 'submitted_count:int'],
+		fields: [
+			'karma:int',
+			'created:timestamp',        // ms; converted from HN seconds at insert
+			'about:varchar:4096',
+			'submitted_count:int'
+		],
 		indexes: ['karma', 'created']
 	});
 
