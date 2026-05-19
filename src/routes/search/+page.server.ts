@@ -17,18 +17,18 @@ async function searchObject<T>(object: string, field: string, q: string): Promis
 		dir: 'hn',
 		object,
 		criteria: [{ field, op: 'icontains', value: q }],
-		order_by: { field: 'time', dir: 'desc' },
-		limit: RESULT_LIMIT,
-		format: 'dict'   // returns { key: {...record fields} } — easier to type
+		order_by: 'time',
+		order: 'desc',
+		limit: RESULT_LIMIT
 	});
 	const queryMs = performance.now() - t0;
 	if (isError(resp)) {
 		return { rows: [], queryMs, error: resp.error };
 	}
-	// format=dict returns either an object or an array depending on cursor.
-	// We requested no cursor; the response is `{ key: {value...} }`.
-	const dict = resp as Record<string, Omit<T, 'key'>>;
-	const rows: T[] = Object.entries(dict).map(([key, value]) => ({ key, ...value } as T));
+	// Default array shape preserves shard-db's order_by; format:dict
+	// would reshuffle by JS integer-key sort and lose newest-first.
+	const arr = resp as Array<{ key: string; value: Omit<T, 'key'> }>;
+	const rows: T[] = arr.map((r) => ({ key: r.key, ...r.value } as T));
 	return { rows, queryMs };
 }
 

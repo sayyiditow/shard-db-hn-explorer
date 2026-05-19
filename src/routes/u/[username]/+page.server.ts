@@ -24,18 +24,18 @@ export const load: PageServerLoad = async ({ params }) => {
 			dir: 'hn',
 			object: 'stories',
 			criteria: [{ field: 'by', op: 'eq', value: username }],
-			order_by: { field: 'time', dir: 'desc' },
-			limit: RECENT_LIMIT,
-			format: 'dict'
+			order_by: 'time',
+			order: 'desc',
+			limit: RECENT_LIMIT
 		}),
 		shardDb.query({
 			mode: 'find',
 			dir: 'hn',
 			object: 'comments',
 			criteria: [{ field: 'by', op: 'eq', value: username }],
-			order_by: { field: 'time', dir: 'desc' },
-			limit: RECENT_LIMIT,
-			format: 'dict'
+			order_by: 'time',
+			order: 'desc',
+			limit: RECENT_LIMIT
 		})
 	]);
 
@@ -49,13 +49,15 @@ export const load: PageServerLoad = async ({ params }) => {
 		user = { key: username, ...(userResp as Omit<UserProfile, 'key'>) };
 	}
 
+	// Default array shape `[{key, value:{...}}]` preserves shard-db's
+	// time-desc order; format:dict would reshuffle by JS integer-key sort.
 	let stories: Story[] = [];
 	let storiesError: string | undefined;
 	if (isError(storiesResp)) {
 		storiesError = storiesResp.error;
 	} else {
-		const dict = storiesResp as Record<string, Omit<Story, 'key'>>;
-		stories = Object.entries(dict).map(([key, value]) => ({ key, ...value }));
+		const arr = storiesResp as Array<{ key: string; value: Omit<Story, 'key'> }>;
+		stories = arr.map((r) => ({ key: r.key, ...r.value }));
 	}
 
 	let comments: Comment[] = [];
@@ -63,8 +65,8 @@ export const load: PageServerLoad = async ({ params }) => {
 	if (isError(commentsResp)) {
 		commentsError = commentsResp.error;
 	} else {
-		const dict = commentsResp as Record<string, Omit<Comment, 'key'>>;
-		comments = Object.entries(dict).map(([key, value]) => ({ key, ...value }));
+		const arr = commentsResp as Array<{ key: string; value: Omit<Comment, 'key'> }>;
+		comments = arr.map((r) => ({ key: r.key, ...r.value }));
 	}
 
 	if (!user && stories.length === 0 && comments.length === 0) {

@@ -33,19 +33,21 @@ export const load: PageServerLoad = async ({ params }) => {
 		dir: 'hn',
 		object: 'comments',
 		criteria: [{ field: 'story_root', op: 'eq', value: idNum }],
-		order_by: { field: 'time', dir: 'asc' },
-		limit: COMMENTS_PAGE_SIZE,
-		format: 'dict'
+		order_by: 'time',
+		order: 'asc',
+		limit: COMMENTS_PAGE_SIZE
 	});
 	const commentsMs = performance.now() - tComments;
 
+	// Default array preserves time-asc sort; format:dict would reshuffle
+	// by JS integer-key sort and break the thread chronology.
 	let comments: Comment[] = [];
 	let commentsError: string | undefined;
 	if (isError(commentsResp)) {
 		commentsError = commentsResp.error;
 	} else {
-		const dict = commentsResp as Record<string, Omit<Comment, 'key'>>;
-		comments = Object.entries(dict).map(([key, value]) => ({ key, ...value }));
+		const arr = commentsResp as Array<{ key: string; value: Omit<Comment, 'key'> }>;
+		comments = arr.map((r) => ({ key: r.key, ...r.value }));
 	}
 
 	const tree = buildCommentTree(comments, idNum);

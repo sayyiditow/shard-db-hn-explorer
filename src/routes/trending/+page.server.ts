@@ -31,15 +31,17 @@ export const load: PageServerLoad = async ({ url }) => {
 
 	const t0 = performance.now();
 	const [topStoriesResp, totalCountResp] = await Promise.all([
-		// Top stories by score within the window
+		// Top stories by score within the window. Default array shape
+		// preserves shard-db's order_by; format:dict would reshuffle by
+		// JS integer-key sort and lose the sort.
 		shardDb.query({
 			mode: 'find',
 			dir: 'hn',
 			object: 'stories',
 			criteria: baseCrit,
-			order_by: { field: 'score', dir: 'desc' },
-			limit: TOP_STORIES_LIMIT,
-			format: 'dict'
+			order_by: 'score',
+			order: 'desc',
+			limit: TOP_STORIES_LIMIT
 		}),
 		// Total story count in the window — sanity figure for the timing badge
 		shardDb.query({
@@ -56,8 +58,8 @@ export const load: PageServerLoad = async ({ url }) => {
 		return { window: win, since, stories: [], totalCount: 0, domains: [], queryMs, error: err };
 	}
 
-	const dict = topStoriesResp as Record<string, Omit<Story, 'key'>>;
-	const stories: Story[] = Object.entries(dict).map(([key, value]) => ({ key, ...value }));
+	const rows = topStoriesResp as Array<{ key: string; value: Omit<Story, 'key'> }>;
+	const stories: Story[] = rows.map((r) => ({ key: r.key, ...r.value }));
 	const totalCount = totalCountResp as number;
 
 	// Bucket by domain (URL host stripped of leading www.) for the
