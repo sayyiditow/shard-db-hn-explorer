@@ -30,3 +30,4 @@ db.env
 db.env.*
 !db.env.example
 *.log
+tmp/
