@@ -135,6 +135,11 @@ async function main() {
 		}
 	}
 
+	// HN's Firebase API returns timestamps in Unix seconds; the schema
+	// uses `timestamp` (Unix milliseconds), so we multiply by 1000 on
+	// the way in. shard-db stores int64 — no overflow risk.
+	const toMs = (sec: number | undefined): number => (sec ? sec * 1000 : 0);
+
 	// Stories
 	process.stdout.write(`  Inserting stories (${stories.length}) ... `);
 	await bulkInsert(
@@ -143,7 +148,7 @@ async function main() {
 			key: String(s.id),
 			value: {
 				by: s.by ?? '',
-				time: s.time ?? 0,
+				time: toMs(s.time),
 				score: s.score ?? 0,
 				url: s.url ?? '',
 				title: s.title ?? '',
@@ -164,7 +169,7 @@ async function main() {
 			key: String(c.id),
 			value: {
 				by: c.by ?? '',
-				time: c.time ?? 0,
+				time: toMs(c.time),
 				parent: c.parent ?? 0,
 				story_root: findStoryRoot(c, byId),
 				text: c.text ?? '',
@@ -191,7 +196,7 @@ async function main() {
 			key: u.id,
 			value: {
 				karma: u.karma ?? 0,
-				created: u.created ?? 0,
+				created: toMs(u.created),
 				about: u.about ?? '',
 				submitted_count: u.submitted?.length ?? 0
 			}
