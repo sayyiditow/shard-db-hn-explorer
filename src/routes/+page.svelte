@@ -71,7 +71,6 @@
 	.hero .tagline {
 		color: var(--c-text-muted);
 		font-size: 1.02rem;
-		max-width: 60ch;
 		margin: 0;
 	}
 	.status {
