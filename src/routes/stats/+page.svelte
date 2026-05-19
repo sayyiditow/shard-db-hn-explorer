@@ -6,6 +6,22 @@
 
 	let { data }: { data: PageData } = $props();
 
+	/** Narrow describe-object response into a renderable shape. The wire
+	 *  payload has more fields (slot_size, max_value, max_key …) we
+	 *  deliberately don't surface — they're server internals, not part
+	 *  of the per-table stats story. */
+	type FieldDef = { name: string; type: string; size: number };
+	type Described = {
+		splits: number;
+		record_count: number;
+		fields: FieldDef[];
+		indexes: string[];
+	};
+	function described(d: unknown): Described | null {
+		if (!d || typeof d !== 'object') return null;
+		return d as Described;
+	}
+
 	// Total of every panel's individual ms, NOT wall-clock. Useful as
 	// "sum of shard-db work" but it overstates real latency because
 	// panels fire in parallel. The header badge shows max(panel) instead.
@@ -139,32 +155,64 @@
 		{/if}
 	</QueryPanel>
 
-	<QueryPanel
-		title="Schema · stories"
-		ms={data.schema.stories.ms}
-		query={data.schema.stories.query}
-		error={data.schema.stories.error}
-	>
-		<pre class="schema"><code>{JSON.stringify(data.schema.stories.data, null, 2)}</code></pre>
-	</QueryPanel>
-
-	<QueryPanel
-		title="Schema · comments"
-		ms={data.schema.comments.ms}
-		query={data.schema.comments.query}
-		error={data.schema.comments.error}
-	>
-		<pre class="schema"><code>{JSON.stringify(data.schema.comments.data, null, 2)}</code></pre>
-	</QueryPanel>
-
-	<QueryPanel
-		title="Schema · users"
-		ms={data.schema.users.ms}
-		query={data.schema.users.query}
-		error={data.schema.users.error}
-	>
-		<pre class="schema"><code>{JSON.stringify(data.schema.users.data, null, 2)}</code></pre>
-	</QueryPanel>
+	{#each [
+		{ name: 'stories', panel: data.schema.stories },
+		{ name: 'comments', panel: data.schema.comments },
+		{ name: 'users', panel: data.schema.users }
+	] as { name, panel } (name)}
+		{@const d = described(panel.data)}
+		<QueryPanel
+			title={name}
+			ms={panel.ms}
+			query={panel.query}
+			error={panel.error}
+		>
+			{#if d}
+				{@const idxSet = new Set(d.indexes)}
+				<div class="schema-summary">
+					<span><strong>{d.record_count.toLocaleString()}</strong> records</span>
+					<span>·</span>
+					<span><strong>{d.splits}</strong> shards</span>
+					<span>·</span>
+					<span><strong>{d.indexes.length}</strong> indexes</span>
+				</div>
+				<table class="field-table">
+					<thead>
+						<tr>
+							<th>field</th>
+							<th>type</th>
+							<th class="num-col">bytes</th>
+							<th>indexed</th>
+						</tr>
+					</thead>
+					<tbody>
+						{#each d.fields as f (f.name)}
+							<tr>
+								<td><code>{f.name}</code></td>
+								<td><span class="type">{f.type}</span></td>
+								<td class="num-col">{f.size}</td>
+								<td>
+									{#if idxSet.has(f.name)}
+										<span class="idx-yes" title="B+ tree index on this field">●</span>
+									{:else}
+										<span class="idx-no">—</span>
+									{/if}
+								</td>
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+				{#if d.indexes.some((i) => i.includes('+'))}
+					<div class="composite-row">
+						<span class="composite-label">composite indexes:</span>
+						{#each d.indexes.filter((i) => i.includes('+')) as ci (ci)}
+							<code class="composite">{ci}</code>
+						{/each}
+					</div>
+				{/if}
+			{/if}
+		</QueryPanel>
+	{/each}
 </div>
 
 <p class="footnote">
@@ -278,21 +326,83 @@
 		font-variant-numeric: tabular-nums;
 	}
 
-	pre.schema {
-		margin: 0;
-		padding: var(--s-3);
-		background: var(--c-bg);
-		border: 1px solid var(--c-border);
-		border-radius: var(--r-sm);
-		max-height: 360px;
-		overflow: auto;
-		font-size: 0.78rem;
-		line-height: 1.45;
+	.schema-summary {
+		display: flex;
+		gap: var(--s-2);
+		font-size: 0.82rem;
+		color: var(--c-text-muted);
+		flex-wrap: wrap;
 	}
-	pre.schema code {
-		font-family: var(--f-mono);
+	.schema-summary strong {
+		color: var(--c-text);
+		font-variant-numeric: tabular-nums;
+	}
+	.field-table {
+		width: 100%;
+		border-collapse: collapse;
+		font-size: 0.85rem;
+	}
+	.field-table th,
+	.field-table td {
+		text-align: left;
+		padding: 0.35rem 0.4rem;
+		border-bottom: 1px solid var(--c-border);
+	}
+	.field-table th {
+		color: var(--c-text-faint);
+		font-weight: 500;
+		font-size: 0.75rem;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+	}
+	.field-table tr:last-child td { border-bottom: 0; }
+	.field-table code {
 		background: transparent;
 		padding: 0;
+		font-family: var(--f-mono);
+		font-size: 0.85rem;
+		color: var(--c-text);
+	}
+	.field-table .type {
+		font-family: var(--f-mono);
+		font-size: 0.8rem;
+		color: var(--c-text-muted);
+		padding: 0.1rem 0.4rem;
+		background: var(--c-surface-2);
+		border-radius: var(--r-sm);
+	}
+	.field-table .num-col {
+		text-align: right;
+		font-variant-numeric: tabular-nums;
+		color: var(--c-text-muted);
+	}
+	.field-table .idx-yes {
+		color: var(--c-good);
+		font-size: 0.7rem;
+	}
+	.field-table .idx-no {
+		color: var(--c-text-faint);
+	}
+	.composite-row {
+		display: flex;
+		gap: var(--s-2);
+		flex-wrap: wrap;
+		align-items: center;
+		font-size: 0.8rem;
+	}
+	.composite-label {
+		color: var(--c-text-faint);
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		font-size: 0.7rem;
+	}
+	.composite {
+		background: var(--c-surface-2);
+		padding: 0.15rem 0.45rem;
+		border-radius: var(--r-sm);
+		font-family: var(--f-mono);
+		font-size: 0.78rem;
+		color: var(--c-text);
 	}
 
 	.muted { color: var(--c-text-muted); }
