@@ -41,29 +41,34 @@ export class ShardDbClient {
 
 	/**
 	 * Send one JSON request, await one response.
+	 *
 	 * The request body is augmented with `token` if the client was
-	 * constructed with one. Returns the parsed response; callers should
-	 * branch on `('error' in resp)` for failures (the server returns
-	 * `{"error": "..."}` for every operational failure).
+	 * constructed with one. Returns the parsed response on success or
+	 * `{ error: "..." }` on any failure mode (connection refused,
+	 * timeout, malformed JSON, or shard-db error response). Callers
+	 * always check `isError(resp)` and never need try/catch.
 	 */
 	async query<T = unknown>(body: Record<string, unknown>): Promise<T | ShardDbError> {
 		const payload = JSON.stringify(this.token ? { ...body, token: this.token } : body);
 
-		return new Promise((resolve, reject) => {
+		return new Promise((resolve) => {
 			const socket = net.createConnection({ host: this.host, port: this.port });
 			let buf = '';
 			let settled = false;
 
-			const settle = (fn: () => void) => {
+			const settle = (value: T | ShardDbError) => {
 				if (settled) return;
 				settled = true;
 				socket.destroy();
-				fn();
+				resolve(value);
 			};
 
 			const timer =
 				this.timeoutMs > 0
-					? setTimeout(() => settle(() => reject(new Error(`shard-db timeout after ${this.timeoutMs}ms`))), this.timeoutMs)
+					? setTimeout(
+							() => settle({ error: `shard-db timeout after ${this.timeoutMs}ms` }),
+							this.timeoutMs
+					  )
 					: null;
 
 			socket.on('connect', () => {
@@ -79,22 +84,23 @@ export class ShardDbClient {
 				if (timer) clearTimeout(timer);
 				try {
 					const parsed = JSON.parse(json) as T | ShardDbError;
-					settle(() => resolve(parsed));
+					settle(parsed);
 				} catch (err) {
-					settle(() => reject(err));
+					settle({ error: `bad response from shard-db: ${err instanceof Error ? err.message : String(err)}` });
 				}
 			});
 
 			socket.on('error', (err) => {
 				if (timer) clearTimeout(timer);
-				settle(() => reject(err));
+				const msg = (err as NodeJS.ErrnoException).code === 'ECONNREFUSED'
+					? `cannot reach shard-db at ${this.host}:${this.port} — is the daemon running?`
+					: err.message;
+				settle({ error: msg });
 			});
 
 			socket.on('close', () => {
-				if (!settled) {
-					if (timer) clearTimeout(timer);
-					settle(() => reject(new Error('shard-db closed connection before response')));
-				}
+				if (timer) clearTimeout(timer);
+				settle({ error: 'shard-db closed connection before response' });
 			});
 		});
 	}
