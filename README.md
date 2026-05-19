@@ -21,32 +21,33 @@ a single small VPS.
 ## Local dev
 
 ```bash
-# 1. Clone + build shard-db as a sibling directory
+# One-time setup
 git clone git@github.com:sayyiditow/shard-db.git ../shard-db
 (cd ../shard-db && ./build.sh)
-
-# 2. Install showcase deps
 bun install
 
-# 3. Spin up a clean local shard-db daemon (port 19199, relative paths only)
-./scripts/dev-up.sh                      # leaves it running in the foreground
-# OR launch in background:
-# ./scripts/dev-up.sh &
-
-# 4. In a second terminal: seed the schema + sample data
-SHARD_DB_PORT=19199 bun run scripts/setup-schema.ts
-SHARD_DB_PORT=19199 bun run scripts/sample-load.ts
-
-# 5. Start the SvelteKit dev server
-SHARD_DB_PORT=19199 bun run dev
+# Run the app (one command, one terminal)
+bun run app
 ```
 
-Open <http://localhost:5173>.
+Open <http://localhost:5173>. `Ctrl-C` stops both the SvelteKit
+dev server and the local shard-db daemon.
 
-`./scripts/dev-up.sh` writes a fresh `db/dev/db.env` with only
-relative paths (`DB_ROOT="data"`, `LOG_DIR="logs"`) and runs
-shard-db with `cwd=db/dev`. The whole `db/` tree is gitignored, so
-your local daemon state never leaks into the repo.
+`bun run app` is `./scripts/dev.sh` — it starts a local shard-db
+on port 19199 with **relative paths only**, waits for it to bind,
+seeds the schema + a 10k-item sample on first run (skipped on
+subsequent runs unless you `rm -rf db/`), then runs the SvelteKit
+dev server in the foreground.
+
+To wipe the local DB and re-seed:
+
+```bash
+rm -rf db/ && bun run app
+```
+
+To run individual steps separately (useful for tweaking schema or
+bulk-load logic), see `scripts/dev-up.sh`, `scripts/setup-schema.ts`,
+`scripts/sample-load.ts`.
 
 ## Repo layout
 
