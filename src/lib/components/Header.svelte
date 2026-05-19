@@ -17,7 +17,18 @@
 <header>
 	<div class="bar">
 		<a class="brand" href="/" aria-label="shard-db HN Explorer home">
-			<span class="brand-mark">SD</span>
+			<span class="brand-mark" aria-hidden="true">
+				<!-- Same three-shard glyph as favicon — visual continuity between
+				     tab icon and in-page brand. -->
+				<svg viewBox="0 0 64 64" width="100%" height="100%">
+					<rect width="64" height="64" rx="10" fill="#15171a"/>
+					<g transform="translate(32 32) rotate(-22)">
+						<rect x="-18" y="-13" width="32" height="7" rx="2" fill="#ff6600" opacity="0.45"/>
+						<rect x="-18" y="-3"  width="32" height="7" rx="2" fill="#ff6600" opacity="0.75"/>
+						<rect x="-18" y="7"   width="32" height="7" rx="2" fill="#ff6600"/>
+					</g>
+				</svg>
+			</span>
 			<span class="brand-text">HN Explorer</span>
 		</a>
 
@@ -70,17 +81,15 @@
 	}
 	.brand:hover { text-decoration: none; }
 	.brand-mark {
-		display: inline-grid;
-		place-items: center;
+		display: inline-flex;
 		width: 28px;
 		height: 28px;
-		background: var(--c-accent);
-		color: white;
 		border-radius: var(--r-sm);
-		font-family: var(--f-mono);
-		font-size: 0.78rem;
-		font-weight: 700;
-		letter-spacing: -0.02em;
+		overflow: hidden;
+		flex-shrink: 0;
+	}
+	.brand-mark svg {
+		display: block;
 	}
 	.brand-text {
 		font-size: 0.95rem;
