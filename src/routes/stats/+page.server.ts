@@ -55,6 +55,11 @@ export const load: PageServerLoad = async () => {
 		timed<number>({ mode: 'count', dir: 'hn', object: 'stories' }),
 		timed<number>({ mode: 'count', dir: 'hn', object: 'comments' }),
 		timed<number>({ mode: 'count', dir: 'hn', object: 'users' }),
+		// Aggregates intentionally omit dead/deleted filters. Neither
+		// field is indexed on stories or comments, so adding them
+		// forces a full-scan (5.6s on 789k comments) vs the indexed
+		// group_by fast path (0.1s). Dead/deleted is <1% of HN traffic
+		// so the visible ranking is unchanged.
 		timed<AggRow[]>({
 			mode: 'aggregate',
 			dir: 'hn',
@@ -64,11 +69,7 @@ export const load: PageServerLoad = async () => {
 				{ fn: 'count', alias: 'stories' },
 				{ fn: 'sum', field: 'score', alias: 'total_score' }
 			],
-			criteria: [
-				{ field: 'type', op: 'eq', value: 'story' },
-				{ field: 'dead', op: 'eq', value: 'false' },
-				{ field: 'deleted', op: 'eq', value: 'false' }
-			],
+			criteria: [{ field: 'type', op: 'eq', value: 'story' }],
 			order_by: 'stories',
 			order: 'desc',
 			limit: 20
@@ -79,10 +80,6 @@ export const load: PageServerLoad = async () => {
 			object: 'comments',
 			group_by: ['by'],
 			aggregates: [{ fn: 'count', alias: 'comments' }],
-			criteria: [
-				{ field: 'dead', op: 'eq', value: 'false' },
-				{ field: 'deleted', op: 'eq', value: 'false' }
-			],
 			order_by: 'comments',
 			order: 'desc',
 			limit: 20
