@@ -72,7 +72,7 @@
 	.comment {
 		padding-left: var(--s-3);
 		border-left: 2px solid var(--c-border);
-		margin: var(--s-3) 0;
+		margin: var(--s-2) 0;
 	}
 	.comment.depth-0 { padding-left: 0; border-left: 0; }
 
@@ -109,12 +109,12 @@
 	.byline .muted { color: var(--c-text-faint); }
 
 	.body {
-		margin: var(--s-2) 0;
+		margin: var(--s-1) 0 0 0;
 		font-size: 0.92rem;
-		line-height: 1.55;
+		line-height: 1.5;
 		color: var(--c-text);
 	}
-	.body :global(p) { margin: 0 0 var(--s-2) 0; }
+	.body :global(p) { margin: 0 0 var(--s-1) 0; }
 	.body :global(p:last-child) { margin-bottom: 0; }
 	.body :global(pre) {
 		background: var(--c-surface-2);
@@ -128,6 +128,6 @@
 	.body :global(a) { color: var(--c-link); }
 
 	.children {
-		margin-top: var(--s-2);
+		margin-top: var(--s-1);
 	}
 </style>
