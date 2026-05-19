@@ -80,14 +80,21 @@ function toMs(unixSec: bigint | number | undefined): number {
 // One connected client per worker. Each bulk-insert call is sequential
 // on a single connection; we get parallelism by holding N connections
 // open and round-robining work across them.
+// Local dev convention matches scripts/dev.sh — 19199 not the
+// shard-db binary default 9199.
+const DEFAULT_PORT = 19199;
+const SHARD_HOST = process.env.SHARD_DB_HOST ?? '127.0.0.1';
+const SHARD_PORT = process.env.SHARD_DB_PORT ? Number(process.env.SHARD_DB_PORT) : DEFAULT_PORT;
+const SHARD_TOKEN = process.env.SHARD_DB_TOKEN;
+
 function buildPool(size: number): ShardDbClient[] {
 	const pool: ShardDbClient[] = [];
 	for (let i = 0; i < size; i++) {
 		pool.push(
 			new ShardDbClient({
-				host: process.env.SHARD_DB_HOST ?? '127.0.0.1',
-				port: process.env.SHARD_DB_PORT ? Number(process.env.SHARD_DB_PORT) : 9199,
-				token: process.env.SHARD_DB_TOKEN,
+				host: SHARD_HOST,
+				port: SHARD_PORT,
+				token: SHARD_TOKEN,
 				timeoutMs: 120_000
 			})
 		);
@@ -312,15 +319,15 @@ function findStoryRoot(commentId: number, items: Map<number, ItemMeta>): number 
 
 async function main() {
 	const adminClient = new ShardDbClient({
-		host: process.env.SHARD_DB_HOST ?? '127.0.0.1',
-		port: process.env.SHARD_DB_PORT ? Number(process.env.SHARD_DB_PORT) : 9199,
-		token: process.env.SHARD_DB_TOKEN,
+		host: SHARD_HOST,
+		port: SHARD_PORT,
+		token: SHARD_TOKEN,
 		timeoutMs: 60_000
 	});
 
 	console.log(`Bulk-load — anantn/hacker-news → shard-db`);
 	console.log(`  target items: ${BULK_TARGET === 0 ? 'FULL SNAPSHOT' : fmtCount(BULK_TARGET)}`);
-	console.log(`  shard-db:     ${process.env.SHARD_DB_HOST ?? '127.0.0.1'}:${process.env.SHARD_DB_PORT ?? 9199}`);
+	console.log(`  shard-db:     ${SHARD_HOST}:${SHARD_PORT}`);
 
 	console.log('\nTruncating existing data:');
 	await truncate(adminClient, 'stories');
