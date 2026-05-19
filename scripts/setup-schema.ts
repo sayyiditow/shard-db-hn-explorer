@@ -1,0 +1,98 @@
+#!/usr/bin/env bun
+/**
+ * Create the three HN objects in shard-db.
+ *
+ * Idempotent: re-running on an existing DB only re-adds the dir
+ * and reports "already exists" for objects; never wipes data.
+ *
+ * Run: bun run scripts/setup-schema.ts
+ */
+
+import { ShardDbClient, isError } from '../src/lib/shard-db/client';
+
+const client = new ShardDbClient({
+	host: process.env.SHARD_DB_HOST ?? '127.0.0.1',
+	port: process.env.SHARD_DB_PORT ? Number(process.env.SHARD_DB_PORT) : 9199,
+	token: process.env.SHARD_DB_TOKEN
+});
+
+const DIR = 'hn';
+
+async function step(label: string, body: Record<string, unknown>) {
+	process.stdout.write(`  ${label} ... `);
+	const resp = await client.query(body);
+	if (isError(resp)) {
+		// "already exists" is fine on re-runs
+		if (resp.error.toLowerCase().includes('exist')) {
+			process.stdout.write('already exists ✓\n');
+			return;
+		}
+		console.log(`FAILED: ${resp.error}`);
+		process.exit(1);
+	}
+	process.stdout.write('ok ✓\n');
+}
+
+async function main() {
+	console.log(`Connecting to shard-db at ${process.env.SHARD_DB_HOST ?? '127.0.0.1'}:${process.env.SHARD_DB_PORT ?? 9199}`);
+	console.log('');
+
+	await step('add-dir hn', { mode: 'add-dir', dir: DIR });
+
+	console.log('\nCreating objects:');
+
+	await step('stories', {
+		mode: 'create-object',
+		dir: DIR,
+		object: 'stories',
+		splits: 64,
+		max_key: 12,
+		fields: [
+			'by:varchar:32',
+			'time:int',
+			'score:int',
+			'url:varchar:512',
+			'title:varchar:512',
+			'descendants:int',
+			'type:varchar:8',
+			'deleted:bool',
+			'dead:bool'
+		],
+		indexes: ['by', 'time', 'score', 'type', 'by+time', 'time+score', 'type+time']
+	});
+
+	await step('comments', {
+		mode: 'create-object',
+		dir: DIR,
+		object: 'comments',
+		splits: 256,
+		max_key: 12,
+		fields: [
+			'by:varchar:32',
+			'time:int',
+			'parent:int',
+			'story_root:int',
+			'text:varchar:8192',
+			'deleted:bool',
+			'dead:bool'
+		],
+		indexes: ['by', 'time', 'parent', 'story_root', 'by+time', 'story_root+time']
+	});
+
+	await step('users', {
+		mode: 'create-object',
+		dir: DIR,
+		object: 'users',
+		splits: 32,
+		max_key: 32,
+		fields: ['karma:int', 'created:int', 'about:varchar:4096', 'submitted_count:int'],
+		indexes: ['karma', 'created']
+	});
+
+	console.log('\nSchema ready.');
+}
+
+main().catch((err) => {
+	console.error(err);
+	process.exit(1);
+});
