@@ -235,7 +235,6 @@
 		margin: 0;
 		color: var(--c-text-muted);
 		font-size: 0.92rem;
-		max-width: 60ch;
 		line-height: 1.5;
 	}
 	.lede em { font-style: italic; }
