@@ -5,14 +5,22 @@
 
 	let { data }: { data: PageData } = $props();
 
-	const TYPES = [
+	// Category pills — combines type filter with derived HN categories
+	// (Ask HN / Show HN are type=story + title starts_with). Order
+	// matches Algolia's: All → Stories → Show HN → Ask HN → Polls →
+	// Jobs. Discovery flow puts Show/Ask near the top because they're
+	// what visitors look for.
+	const CATEGORIES = [
 		{ value: '',      label: 'All' },
 		{ value: 'story', label: 'Stories' },
-		{ value: 'job',   label: 'Jobs' },
-		{ value: 'poll',  label: 'Polls' }
+		{ value: 'show',  label: 'Show HN' },
+		{ value: 'ask',   label: 'Ask HN' },
+		{ value: 'poll',  label: 'Polls' },
+		{ value: 'job',   label: 'Jobs' }
 	];
 	const SORTS = [
 		{ value: 'popularity', label: 'Popularity' },
+		{ value: 'hot',        label: 'Hot' },
 		{ value: 'newest',     label: 'Newest' }
 	];
 	const WINDOWS = [
@@ -29,14 +37,14 @@
 		const params = new URLSearchParams();
 		const next = {
 			q: data.q,
-			type: data.type,
+			category: data.category,
 			sort: data.sort,
 			window: data.window,
 			by: data.by,
 			...patch
 		};
 		if (next.q) params.set('q', next.q);
-		if (next.type) params.set('type', next.type);
+		if (next.category) params.set('category', next.category);
 		if (next.sort && next.sort !== 'popularity') params.set('sort', next.sort);
 		if (next.window && next.window !== 'all') params.set('window', next.window);
 		if (next.by) params.set('by', next.by);
@@ -52,7 +60,7 @@
 		if (!data.nextCursor) return null;
 		const params = new URLSearchParams();
 		if (data.q) params.set('q', data.q);
-		if (data.type) params.set('type', data.type);
+		if (data.category) params.set('category', data.category);
 		if (data.sort && data.sort !== 'popularity') params.set('sort', data.sort);
 		if (data.window && data.window !== 'all') params.set('window', data.window);
 		if (data.by) params.set('by', data.by);
@@ -106,8 +114,10 @@
 		</h1>
 		<p class="subtitle">
 			<strong>{data.totalCount.toLocaleString()}</strong> matching
-			{data.type === 'job'  ? 'job'  :
-			 data.type === 'poll' ? 'poll' :
+			{data.category === 'job'  ? 'job'  :
+			 data.category === 'poll' ? 'poll' :
+			 data.category === 'ask'  ? 'Ask HN post' :
+			 data.category === 'show' ? 'Show HN post' :
 			 'story'}{data.totalCount === 1 ? '' : 's'}
 			· page of {data.pageSize}
 		</p>
@@ -119,11 +129,11 @@
      relevant param patched on top of the current URL state. -->
 <div class="filter-bar" role="navigation" aria-label="Filters">
 	<div class="filter-row">
-		<span class="filter-label">Type</span>
-		{#each TYPES as t (t.value)}
-			<a href={pillHref({ type: t.value })}
-			   class:active={(data.type || '') === t.value}
-			>{t.label}</a>
+		<span class="filter-label">Category</span>
+		{#each CATEGORIES as c (c.value)}
+			<a href={pillHref({ category: c.value })}
+			   class:active={(data.category || '') === c.value}
+			>{c.label}</a>
 		{/each}
 	</div>
 	<div class="filter-row">
@@ -158,7 +168,7 @@
 {:else if data.stories.length === 0}
 	<p class="muted empty-msg">
 		No results.
-		{#if data.q || data.type || data.window !== 'all' || data.by}
+		{#if data.q || data.category || data.window !== 'all' || data.by}
 			Try widening the filters.
 		{/if}
 	</p>
@@ -166,25 +176,43 @@
 	<ol class="story-list">
 		{#each data.stories as s (s.key)}
 			{@const domain = domainOf(s.url)}
-			<li>
-				<div class="row">
-					<div class="title">
-						{#if s.url}
-							<a href={s.url} target="_blank" rel="noopener">{s.title}</a>
-						{:else}
-							<a href="/item/{s.key}">{s.title}</a>
-						{/if}
-						{#if domain}<span class="domain">({domain})</span>{/if}
-					</div>
-					<div class="byline">
-						<span class="score">{s.score} points</span>
-						· by <a href={pillHref({ by: s.by })}>{s.by}</a>
-						· <time title={absoluteTime(s.time)}>{relativeTime(s.time)}</time>
-						· <a href="/item/{s.key}">{pluralise(s.descendants ?? 0, 'comment')}</a>
-						{#if s.type !== 'story'}
-							· <span class="type-pill">{s.type}</span>
-						{/if}
-					</div>
+			<li class="story">
+				<div class="title">
+					{#if s.url}
+						<a href={s.url} target="_blank" rel="noopener">{s.title}</a>
+					{:else}
+						<a href="/item/{s.key}">{s.title}</a>
+					{/if}
+					{#if domain}<span class="domain">({domain})</span>{/if}
+				</div>
+				<div class="byline">
+					<span class="meta meta-score" title="Points">
+						<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
+							<path fill="currentColor" d="M8 15l-1-.9C3 10.4 1 8.6 1 6.4 1 4.5 2.4 3 4.3 3c1 0 2.1.5 2.7 1.4C7.6 3.5 8.7 3 9.7 3 11.6 3 13 4.5 13 6.4c0 2.2-2 4-6 7.7L8 15z"/>
+						</svg>
+						<strong>{s.score}</strong> points
+					</span>
+					<span class="meta meta-author" title="Author">
+						<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
+							<path fill="currentColor" d="M8 8a3 3 0 100-6 3 3 0 000 6zm0 1c-3 0-6 1.5-6 4v2h12v-2c0-2.5-3-4-6-4z"/>
+						</svg>
+						by <a href={pillHref({ by: s.by })}>{s.by}</a>
+					</span>
+					<span class="meta meta-time" title={absoluteTime(s.time)}>
+						<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
+							<path fill="none" stroke="currentColor" stroke-width="1.4" d="M8 14A6 6 0 108 2a6 6 0 000 12zM8 4.5V8l2.5 1.5"/>
+						</svg>
+						<time>{relativeTime(s.time)}</time>
+					</span>
+					<span class="meta meta-comments" title="Comments">
+						<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
+							<path fill="currentColor" d="M2 3h12a1 1 0 011 1v7a1 1 0 01-1 1H6l-3 3v-3H2a1 1 0 01-1-1V4a1 1 0 011-1z"/>
+						</svg>
+						<a href="/item/{s.key}">{s.descendants ?? 0}</a>
+					</span>
+					{#if s.type !== 'story'}
+						<span class="meta type-pill">{s.type}</span>
+					{/if}
 				</div>
 			</li>
 		{/each}
@@ -297,21 +325,49 @@
 		margin: 0;
 		display: flex;
 		flex-direction: column;
-		gap: var(--s-3);
 	}
-	.row { flex: 1; min-width: 0; }
-	.title { font-size: 1rem; line-height: 1.35; }
+	.story {
+		padding: var(--s-3) 0;
+		border-bottom: 1px solid var(--c-border);
+	}
+	.story:last-child { border-bottom: 0; }
+	.title { font-size: 1.02rem; line-height: 1.4; }
 	.title a { color: var(--c-text); text-decoration: none; }
 	.title a:hover { color: var(--c-accent); text-decoration: none; }
-	.domain { color: var(--c-text-muted); font-size: 0.85rem; margin-left: 0.4rem; }
-	.byline {
+	.domain {
 		color: var(--c-text-muted);
 		font-size: 0.85rem;
-		margin-top: 0.15rem;
+		margin-left: 0.5rem;
+		font-family: var(--f-mono);
 	}
-	.byline a { color: var(--c-text-muted); text-decoration: none; }
-	.byline a:hover { color: var(--c-accent); text-decoration: none; }
-	.score { color: var(--c-text); font-weight: 600; }
+	.byline {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0 var(--s-3);
+		margin-top: var(--s-2);
+		font-size: 0.82rem;
+		color: var(--c-text-muted);
+	}
+	/* Each meta segment is icon + value. Icons inherit colour from
+	   the segment for cheap theming — meta-score icon picks up the
+	   accent, others stay muted. */
+	.meta {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.3rem;
+		white-space: nowrap;
+	}
+	.meta svg { flex-shrink: 0; vertical-align: middle; }
+	.meta a { color: inherit; text-decoration: none; }
+	.meta a:hover { color: var(--c-accent); text-decoration: none; }
+
+	.meta-score { color: var(--c-accent); }
+	.meta-score strong { font-weight: 700; }
+	.meta-author { color: var(--c-text); }
+	.meta-author a { color: var(--c-text); }
+	.meta-time   { color: var(--c-text-muted); }
+	.meta-comments { color: var(--c-text); }
+
 	.type-pill {
 		display: inline-block;
 		font-size: 0.7rem;
@@ -319,7 +375,9 @@
 		color: var(--c-accent);
 		border: 1px solid var(--c-accent);
 		border-radius: var(--r-sm);
-		padding: 0 0.35rem;
+		padding: 0 0.4rem;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
 	}
 
 	.db-strip {

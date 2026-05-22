@@ -41,6 +41,12 @@
 	--page-max: 1200px;
 }
 
+/* Dark palette — applied via system preference OR explicit
+   data-theme="dark" set by the ThemeToggle. data-theme="light" forces
+   light even when the system says dark. The cascade order matters:
+   media-query selector wins over plain :root, and the data-theme
+   selectors win over the media query (because they're more specific
+   AND they live below the media block). */
 @media (prefers-color-scheme: dark) {
 	:root {
 		--c-bg: #15171a;
@@ -57,6 +63,38 @@
 		--c-good: #4ade80;
 		--c-warn: #f87171;
 	}
+}
+
+:root[data-theme='dark'] {
+	--c-bg: #15171a;
+	--c-surface: #1c1f24;
+	--c-surface-2: #252931;
+	--c-text: #e9ecf1;
+	--c-text-muted: #a8b0bb;
+	--c-text-faint: #6b7280;
+	--c-border: #2e333c;
+	--c-accent: #ff8033;
+	--c-accent-soft: #2a1810;
+	--c-link: #6ea8fe;
+	--c-link-hover: #8db5ff;
+	--c-good: #4ade80;
+	--c-warn: #f87171;
+}
+
+:root[data-theme='light'] {
+	--c-bg: #fdfdfd;
+	--c-surface: #f6f7f9;
+	--c-surface-2: #eaecef;
+	--c-text: #1a1a1a;
+	--c-text-muted: #5b6470;
+	--c-text-faint: #8d96a3;
+	--c-border: #d8dde3;
+	--c-accent: #ff6600;
+	--c-accent-soft: #fff0e6;
+	--c-link: #0a58ca;
+	--c-link-hover: #074db5;
+	--c-good: #1e8a3c;
+	--c-warn: #c0392b;
 }
 
 /* Global reset — bare minimum */

@@ -27,21 +27,45 @@ const WINDOW_MS: Record<string, number | null> = {
 	'all': null
 };
 
-type Sort = 'popularity' | 'newest';
+type Sort = 'popularity' | 'newest' | 'hot';
 const SORT_FIELDS: Record<Sort, string> = {
 	popularity: 'score',
-	newest:     'time'
+	newest:     'time',
+	hot:        'score'  // hot = score desc within an implicit recent window
 };
 
-export const load: PageServerLoad = async ({ url }) => {
-	const q      = (url.searchParams.get('q')      ?? '').trim();
-	const type   = (url.searchParams.get('type')   ?? '').trim();
-	const sortRaw = (url.searchParams.get('sort')  ?? 'popularity').trim();
-	const winRaw  = (url.searchParams.get('window')?? 'all').trim();
-	const by     = (url.searchParams.get('by')     ?? '').trim();
-	const after  = (url.searchParams.get('after')  ?? '').trim();
+/** "Hot" enforces a recency window. HN's real ranking is
+ *  `score / (age_hours + 2)^1.8` — we approximate with the simpler
+ *  "highest-scored items in the last N days" since we don't have a
+ *  computed field. 30 days is enough to surface anything currently
+ *  active without slipping into bygone-classics territory. */
+const HOT_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 
-	const sort: Sort = sortRaw === 'newest' ? 'newest' : 'popularity';
+/** Category combines `type` (enum bitmap) with optional title prefix
+ *  to surface HN's signature derived categories (Ask HN, Show HN).
+ *  - story / job / poll → straight enum eq
+ *  - ask  → type=story AND title starts_with "Ask HN"
+ *  - show → type=story AND title starts_with "Show HN"
+ *  - ''   → no category filter (everything except pollopt) */
+type Category = '' | 'story' | 'job' | 'poll' | 'ask' | 'show';
+const CATEGORIES = new Set<Category>(['', 'story', 'job', 'poll', 'ask', 'show']);
+
+export const load: PageServerLoad = async ({ url }) => {
+	const q         = (url.searchParams.get('q')         ?? '').trim();
+	// `category` supersedes the previous `type` param. Old `?type=foo`
+	// links still work via a fallback below — keeps deep-linked Algolia-
+	// style URLs from breaking after this refactor.
+	const catRaw    = (url.searchParams.get('category')  ?? url.searchParams.get('type') ?? '').trim();
+	const sortRaw   = (url.searchParams.get('sort')      ?? 'popularity').trim();
+	const winRaw    = (url.searchParams.get('window')    ?? 'all').trim();
+	const by        = (url.searchParams.get('by')        ?? '').trim();
+	const after     = (url.searchParams.get('after')     ?? '').trim();
+
+	const category: Category = CATEGORIES.has(catRaw as Category) ? (catRaw as Category) : '';
+	const sort: Sort =
+		sortRaw === 'newest' ? 'newest'
+		: sortRaw === 'hot' ? 'hot'
+		: 'popularity';
 	const win  = winRaw in WINDOW_MS ? winRaw : 'all';
 	const order_by = SORT_FIELDS[sort];
 
@@ -55,14 +79,27 @@ export const load: PageServerLoad = async ({ url }) => {
 	criteria.push({ field: 'dead',    op: 'eq', value: 'false' });
 	criteria.push({ field: 'deleted', op: 'eq', value: 'false' });
 
-	if (type) {
-		// `type` is an enum field → auto-bitmap. Selective when filtered
-		// to job/poll/pollopt, broad when type=story (~99% of items).
-		criteria.push({ field: 'type', op: 'eq', value: type });
-	} else {
-		// Default: hide pollopts (they're option entries of polls, not
-		// independent items) when nothing else is filtered.
-		criteria.push({ field: 'type', op: 'in', value: 'story,job,poll' });
+	// Category → up to two criteria (type eq + optional title starts_with).
+	switch (category) {
+		case 'story': criteria.push({ field: 'type', op: 'eq', value: 'story' }); break;
+		case 'job':   criteria.push({ field: 'type', op: 'eq', value: 'job'   }); break;
+		case 'poll':  criteria.push({ field: 'type', op: 'eq', value: 'poll'  }); break;
+		case 'ask':
+			// Ask HN posts → type=story AND title starts with "Ask HN"
+			// (case-insensitive, since some posts use "Ask hn", "ASK HN", etc).
+			// We use case-sensitive starts_with on the literal `Ask HN`
+			// since 99%+ of legitimate Ask HN posts use that exact prefix.
+			criteria.push({ field: 'type',  op: 'eq',          value: 'story' });
+			criteria.push({ field: 'title', op: 'starts',      value: 'Ask HN' });
+			break;
+		case 'show':
+			criteria.push({ field: 'type',  op: 'eq',          value: 'story' });
+			criteria.push({ field: 'title', op: 'starts',      value: 'Show HN' });
+			break;
+		default:
+			// No explicit category — hide pollopts (poll-option entries
+			// aren't independent items, just children of poll parents).
+			criteria.push({ field: 'type', op: 'in', value: 'story,job,poll' });
 	}
 
 	if (q.length >= 3) {
@@ -76,6 +113,13 @@ export const load: PageServerLoad = async ({ url }) => {
 	const windowMs = WINDOW_MS[win];
 	if (windowMs != null) {
 		const since = Date.now() - windowMs;
+		criteria.push({ field: 'time', op: 'gte', value: since });
+	} else if (sort === 'hot') {
+		// `hot` carries an implicit recency window even when the visitor
+		// hasn't picked one — "hot all time" is just "popularity all time".
+		// Honour the explicit window if set; only inject the implicit one
+		// for the default `all` selection.
+		const since = Date.now() - HOT_WINDOW_MS;
 		criteria.push({ field: 'time', op: 'gte', value: since });
 	}
 
@@ -138,7 +182,7 @@ export const load: PageServerLoad = async ({ url }) => {
 	if (isError(pageResp) || isError(countResp)) {
 		const err = isError(pageResp) ? pageResp.error : (countResp as { error: string }).error;
 		return {
-			q, type, sort, window: win, by, page,
+			q, category, sort, window: win, by, page,
 			stories: [], totalCount: 0, queryMs,
 			pageSize: PAGE_SIZE,
 			nextCursor: null as string | null,
@@ -163,7 +207,7 @@ export const load: PageServerLoad = async ({ url }) => {
 	const totalCount = countResp as number;
 
 	return {
-		q, type, sort, window: win, by, page,
+		q, category, sort, window: win, by, page,
 		stories, totalCount, queryMs,
 		pageSize: PAGE_SIZE,
 		nextCursor,
