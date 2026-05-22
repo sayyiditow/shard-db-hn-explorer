@@ -2,9 +2,13 @@
 	import TimingBadge from '$lib/components/TimingBadge.svelte';
 	import ShareMenu from '$lib/components/ShareMenu.svelte';
 	import { relativeTime, absoluteTime, domainOf, pluralise, commentSnippet } from '$lib/hn/format';
+	import type { Story, Comment } from '$lib/hn/types';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
+
+	let comments = $derived(data.source === 'comments' ? (data.items as Comment[]) : []);
+	let stories  = $derived(data.source !== 'comments' ? (data.items as Story[]) : []);
 
 	// Category pills — combines type filter with derived HN categories
 	// (Ask HN / Show HN are type=story + title starts_with). Order
@@ -189,7 +193,7 @@
 	<!-- Comments source: each row shows author + snippet + thread link.
 	     No score, no URL, no title — comments are different beasts. -->
 	<ol class="story-list">
-		{#each data.items as c (c.key)}
+		{#each comments as c (c.key)}
 			<li class="story">
 				<div class="comment-body">
 					{commentSnippet(c.text ?? '', 320)}
@@ -219,7 +223,7 @@
 	</ol>
 {:else}
 	<ol class="story-list">
-		{#each data.items as s (s.key)}
+		{#each stories as s (s.key)}
 			{@const domain = domainOf(s.url)}
 			<li class="story">
 				<div class="title">
@@ -257,7 +261,8 @@
 					</span>
 					<span class="meta meta-comments" title="Comments">
 						<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
-							<path fill="currentColor" d="M2 3h12a1 1 0 011 1v7a1 1 0 01-1 1H6l-3 3v-3H2a1 1 0 01-1-1V4a1 1 0 011-1z"/>
+							<path fill="none" stroke="currentColor" stroke-width="1.3" d="M14 12.7A5 5 0 0012.4 9 5 5 0 009 3.6"/>
+							<path fill="none" stroke="currentColor" stroke-width="1.3" d="M11.5 14.7a5 5 0 003.5-4.3M5 10.5l-3 2v-3A5 5 0 015 2.5h.5"/>
 						</svg>
 						<a href="/item/{s.key}">{s.descendants ?? 0}</a>
 					</span>

@@ -73,6 +73,7 @@
 		padding-left: var(--s-3);
 		border-left: 2px solid var(--c-border);
 		margin: var(--s-2) 0;
+		scroll-margin-top: 3.5rem;
 	}
 	.comment.depth-0 { padding-left: 0; border-left: 0; }
 
