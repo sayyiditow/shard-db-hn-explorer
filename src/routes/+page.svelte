@@ -1,5 +1,6 @@
 <script lang="ts">
 	import TimingBadge from '$lib/components/TimingBadge.svelte';
+	import ShareMenu from '$lib/components/ShareMenu.svelte';
 	import { relativeTime, absoluteTime, domainOf, pluralise, commentSnippet } from '$lib/hn/format';
 	import type { PageData } from './$types';
 
@@ -219,6 +220,9 @@
 					{#if s.type !== 'story'}
 						<span class="meta type-pill">{s.type}</span>
 					{/if}
+					<span class="meta meta-share">
+						<ShareMenu itemKey={s.key} title={s.title} />
+					</span>
 				</div>
 			</li>
 		{/each}
@@ -392,6 +396,7 @@
 		text-transform: uppercase;
 		letter-spacing: 0.05em;
 	}
+	.meta-share { margin-left: auto; }
 
 	.db-strip {
 		display: flex;
