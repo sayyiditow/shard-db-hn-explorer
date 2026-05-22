@@ -93,15 +93,8 @@
 	<meta name="description" content="A live explorer for Hacker News built on shard-db. Browse, filter by type, sort, paginate via shard-db cursors — all in milliseconds." />
 </svelte:head>
 
-<!-- Two-column header that shares vertical space between title +
-     filter bar (left, fills available width) and the IN THE DB +
-     timing card (right, fixed width). Filter pills no longer get
-     their own full-width row — they sit under the title in the
-     left column, so their width is `viewport - stats-card-width`.
-     Saves vertical space and keeps the stats panel anchored at the
-     same x-position throughout the page. -->
 <section class="page-header">
-	<div class="header-main">
+	<div class="header-title">
 		<h1>
 			{#if data.q}
 				Results for <q>{data.q}</q>
@@ -125,7 +118,9 @@
 				{data.totalCount === 1 ? 'story' : 'stories'}
 			{/if}
 		</p>
+	</div>
 
+	<div class="header-controls">
 		<div class="filter-bar" role="navigation" aria-label="Filters">
 			<div class="filter-row">
 				<span class="filter-label">Category</span>
@@ -160,23 +155,25 @@
 				</div>
 			{/if}
 		</div>
-	</div>
 
-	<aside class="header-stats" aria-label="Dataset size + page timing">
-		<div class="db-mini">
-			<span class="db-mini-label">In the DB</span>
-			<span class="db-mini-row">
-				<strong>{data.dbStats.stories.toLocaleString()}</strong> stories
-			</span>
-			<span class="db-mini-row">
-				<strong>{data.dbStats.comments.toLocaleString()}</strong> comments
-			</span>
-			<span class="db-mini-row">
-				<strong>{data.dbStats.users.toLocaleString()}</strong> users
-			</span>
+		<div class="stats-wrapper">
+			<aside class="header-stats" aria-label="Dataset size + page timing">
+				<div class="db-mini">
+					<span class="db-mini-label">In the DB</span>
+					<span class="db-mini-row">
+						<strong>{data.dbStats.stories.toLocaleString()}</strong> stories
+					</span>
+					<span class="db-mini-row">
+						<strong>{data.dbStats.comments.toLocaleString()}</strong> comments
+					</span>
+					<span class="db-mini-row">
+						<strong>{data.dbStats.users.toLocaleString()}</strong> users
+					</span>
+				</div>
+			</aside>
+			<TimingBadge ms={data.queryMs} label="page + count" />
 		</div>
-		<TimingBadge ms={data.queryMs} label="page + count" />
-	</aside>
+	</div>
 </section>
 
 {#if data.error}
@@ -306,26 +303,33 @@
 <style>
 	.page-header {
 		display: flex;
-		align-items: flex-start;
-		gap: var(--s-4);
-		justify-content: space-between;
+		flex-direction: column;
+		gap: var(--s-3);
 		margin-bottom: var(--s-4);
 	}
 	.page-header h1 { margin: 0 0 var(--s-2) 0; font-size: 1.6rem; }
 	.subtitle { color: var(--c-text-muted); margin: 0; font-size: 0.95rem; }
-	.header-main {
-		flex: 1;
-		min-width: 0;
+	.header-title {
 		display: flex;
 		flex-direction: column;
-		gap: var(--s-3);
+		gap: var(--s-2);
+	}
+	.header-controls {
+		display: flex;
+		gap: var(--s-4);
+		align-items: stretch;
+	}
+	.stats-wrapper {
+		display: flex;
+		flex-direction: column;
+		justify-content: flex-end;
+		gap: var(--s-2);
+		flex-shrink: 0;
 	}
 	.header-stats {
 		display: flex;
 		flex-direction: column;
-		align-items: flex-end;
-		gap: var(--s-2);
-		flex-shrink: 0;
+		align-items: stretch;
 	}
 	.db-mini {
 		display: flex;
@@ -356,10 +360,13 @@
 	}
 
 	.filter-bar {
+		flex: 1;
+		min-width: 0;
 		display: flex;
 		flex-direction: column;
-		gap: var(--s-2);
-		padding: var(--s-3);
+		justify-content: flex-end;
+		gap: var(--s-3);
+		padding: var(--s-6) var(--s-3) var(--s-3);
 		border: 1px solid var(--c-border);
 		border-radius: var(--r-md);
 		background: var(--c-surface);
@@ -562,5 +569,6 @@
 	@media (max-width: 640px) {
 		.page-link { min-width: 3.5rem; padding: 0.4rem 0.5rem; }
 		.page-num .of { display: none; }
+		.header-controls { flex-direction: column; }
 	}
 </style>
