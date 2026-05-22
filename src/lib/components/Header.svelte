@@ -12,6 +12,21 @@
 	$effect(() => {
 		q = initialQ;
 	});
+
+	// Trigram is a 3-char window — patterns shorter than 3 chars can't use
+	// the trigram index and would force a full-record scan on bio/text.
+	// Enforce client-side so the server never sees the unindexed shape;
+	// keeps the search bar honest about what shard-db can answer fast.
+	const MIN_Q_LEN = 3;
+	let qTrim = $derived(q.trim());
+	let qTooShort = $derived(qTrim.length > 0 && qTrim.length < MIN_Q_LEN);
+	let qOk = $derived(qTrim.length >= MIN_Q_LEN);
+
+	function onSubmit(e: SubmitEvent) {
+		if (!qOk) {
+			e.preventDefault();
+		}
+	}
 </script>
 
 <header>
@@ -32,7 +47,14 @@
 			<span class="brand-text">HN Explorer</span>
 		</a>
 
-		<form class="search" action="/search" method="get" role="search">
+		<form
+			class="search"
+			class:invalid={qTooShort}
+			action="/search"
+			method="get"
+			role="search"
+			onsubmit={onSubmit}
+		>
 			<input
 				type="search"
 				name="q"
@@ -40,13 +62,24 @@
 				placeholder="Search stories, comments, users…"
 				autocomplete="off"
 				aria-label="Search Hacker News"
+				aria-invalid={qTooShort}
+				minlength={MIN_Q_LEN}
 				required
 			/>
-			<button type="submit" aria-label="Search">↵</button>
+			<button
+				type="submit"
+				aria-label="Search"
+				disabled={!qOk}
+				title={qTooShort ? `Minimum ${MIN_Q_LEN} characters` : 'Search'}
+			>↵</button>
+			{#if qTooShort}
+				<span class="hint" role="status">≥ {MIN_Q_LEN} chars</span>
+			{/if}
 		</form>
 
 		<nav>
 			<a href="/trending" class:active={path === '/trending'}>Trending</a>
+			<a href="/jobs" class:active={path === '/jobs'}>Jobs</a>
 			<a href="/stats" class:active={path === '/stats'}>Stats</a>
 		</nav>
 	</div>
@@ -125,7 +158,21 @@
 		cursor: pointer;
 		font-family: var(--f-mono);
 	}
-	.search button:hover { color: var(--c-accent); }
+	.search button:hover:not(:disabled) { color: var(--c-accent); }
+	.search button:disabled { cursor: not-allowed; opacity: 0.4; }
+	/* Trigram is a 3-char window — patterns shorter than 3 chars
+	   can't use the index and would force unindexed scans. Dim
+	   the border + show a hint when the typed query is below the
+	   floor so the visitor understands why submit is disabled. */
+	.search.invalid { border-color: var(--c-text-muted); }
+	.search .hint {
+		align-self: center;
+		padding: 0 0.7rem;
+		color: var(--c-text-muted);
+		font-size: 0.72rem;
+		font-family: var(--f-mono);
+		white-space: nowrap;
+	}
 	nav {
 		display: flex;
 		gap: var(--s-3);

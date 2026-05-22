@@ -16,7 +16,31 @@
 	}
 	let { title, ms, query, error, children }: Props = $props();
 
-	let queryPretty = $derived(JSON.stringify(query, null, 2));
+	// Redact any auth-shaped fields before rendering. /stats today
+	// only fires public-aggregate queries with no secrets, but the
+	// "show shard-db query" UI is a wide-open primitive — a future
+	// panel that adds a token / per-user filter / opaque session key
+	// could silently leak it. Strip keys named `auth` / `token` /
+	// `password` / anything starting with `_` at any nesting depth.
+	// Cheap insurance, no impact on the educational value of the
+	// rendered JSON for the existing public queries.
+	const REDACT_KEYS = new Set(['auth', 'token', 'password', 'secret', 'api_key']);
+	function redact(v: unknown): unknown {
+		if (Array.isArray(v)) return v.map(redact);
+		if (v && typeof v === 'object') {
+			const out: Record<string, unknown> = {};
+			for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
+				if (REDACT_KEYS.has(k.toLowerCase()) || k.startsWith('_')) {
+					out[k] = '<redacted>';
+				} else {
+					out[k] = redact(val);
+				}
+			}
+			return out;
+		}
+		return v;
+	}
+	let queryPretty = $derived(JSON.stringify(redact(query), null, 2));
 </script>
 
 <section class="panel">
