@@ -93,12 +93,13 @@
 	<meta name="description" content="A live explorer for Hacker News built on shard-db. Browse, filter by type, sort, paginate via shard-db cursors — all in milliseconds." />
 </svelte:head>
 
-<!-- Page header — two-column.
-       Left: title + result summary
-       Right: a single right-rail panel that combines the
-       "In the DB" dataset size with this page's timing badge so
-       both pieces of stats info sit together instead of fighting
-       for visual real-estate. -->
+<!-- Two-column header that shares vertical space between title +
+     filter bar (left, fills available width) and the IN THE DB +
+     timing card (right, fixed width). Filter pills no longer get
+     their own full-width row — they sit under the title in the
+     left column, so their width is `viewport - stats-card-width`.
+     Saves vertical space and keeps the stats panel anchored at the
+     same x-position throughout the page. -->
 <section class="page-header">
 	<div class="header-main">
 		<h1>
@@ -124,6 +125,41 @@
 				{data.totalCount === 1 ? 'story' : 'stories'}
 			{/if}
 		</p>
+
+		<div class="filter-bar" role="navigation" aria-label="Filters">
+			<div class="filter-row">
+				<span class="filter-label">Category</span>
+				{#each CATEGORIES as c (c.value)}
+					<a href={pillHref({ category: c.value })}
+					   class:active={(data.category || '') === c.value}
+					>{c.label}</a>
+				{/each}
+			</div>
+			<div class="filter-row filter-row-split">
+				<span class="filter-label">Sort</span>
+				{#each SORTS as s (s.value)}
+					<a href={pillHref({ sort: s.value })}
+					   class:active={data.sort === s.value}
+					>{s.label}</a>
+				{/each}
+				<span class="filter-divider" aria-hidden="true"></span>
+				<span class="filter-label">Window</span>
+				{#each WINDOWS as w (w.value)}
+					<a href={pillHref({ window: w.value })}
+					   class:active={data.window === w.value}
+					>{w.label}</a>
+				{/each}
+			</div>
+			{#if data.by}
+				<div class="filter-row author-filter">
+					<span class="filter-label">By</span>
+					<span class="author-pill">
+						<a href="/u/{data.by}">{data.by}</a>
+						<a href={pillHref({ by: '' })} class="clear" title="Clear author filter">×</a>
+					</span>
+				</div>
+			{/if}
+		</div>
 	</div>
 
 	<aside class="header-stats" aria-label="Dataset size + page timing">
@@ -142,45 +178,6 @@
 		<TimingBadge ms={data.queryMs} label="page + count" />
 	</aside>
 </section>
-
-<!-- Filter pills, two-line layout:
-       Row 1: Category (the primary "what am I looking at" axis)
-       Row 2: Sort + Window combined, separated by a thin divider
-     Author filter chip drops in below Row 2 when active. -->
-<div class="filter-bar" role="navigation" aria-label="Filters">
-	<div class="filter-row">
-		<span class="filter-label">Category</span>
-		{#each CATEGORIES as c (c.value)}
-			<a href={pillHref({ category: c.value })}
-			   class:active={(data.category || '') === c.value}
-			>{c.label}</a>
-		{/each}
-	</div>
-	<div class="filter-row filter-row-split">
-		<span class="filter-label">Sort</span>
-		{#each SORTS as s (s.value)}
-			<a href={pillHref({ sort: s.value })}
-			   class:active={data.sort === s.value}
-			>{s.label}</a>
-		{/each}
-		<span class="filter-divider" aria-hidden="true"></span>
-		<span class="filter-label">Window</span>
-		{#each WINDOWS as w (w.value)}
-			<a href={pillHref({ window: w.value })}
-			   class:active={data.window === w.value}
-			>{w.label}</a>
-		{/each}
-	</div>
-	{#if data.by}
-		<div class="filter-row author-filter">
-			<span class="filter-label">By</span>
-			<span class="author-pill">
-				<a href="/u/{data.by}">{data.by}</a>
-				<a href={pillHref({ by: '' })} class="clear" title="Clear author filter">×</a>
-			</span>
-		</div>
-	{/if}
-</div>
 
 {#if data.error}
 	<p class="error">{data.error}</p>
@@ -316,7 +313,13 @@
 	}
 	.page-header h1 { margin: 0 0 var(--s-2) 0; font-size: 1.6rem; }
 	.subtitle { color: var(--c-text-muted); margin: 0; font-size: 0.95rem; }
-	.header-main { flex: 1; min-width: 0; }
+	.header-main {
+		flex: 1;
+		min-width: 0;
+		display: flex;
+		flex-direction: column;
+		gap: var(--s-3);
+	}
 	.header-stats {
 		display: flex;
 		flex-direction: column;
@@ -356,7 +359,6 @@
 		display: flex;
 		flex-direction: column;
 		gap: var(--s-2);
-		margin-bottom: var(--s-4);
 		padding: var(--s-3);
 		border: 1px solid var(--c-border);
 		border-radius: var(--r-md);
