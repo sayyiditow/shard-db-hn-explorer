@@ -92,20 +92,14 @@
 	<meta name="description" content="A live explorer for Hacker News built on shard-db. Browse, filter by type, sort, paginate via shard-db cursors — all in milliseconds." />
 </svelte:head>
 
-<!-- "What's in the DB right now" — compact strip. Three counts in
-     parallel hit kf-header metadata (O(1)), cheap enough to fire on
-     every home load. Same numbers visitors used to see in the big
-     card on the prior home page, just trimmed so the browse list
-     becomes the page's focus. -->
-<aside class="db-strip" aria-label="Dataset size">
-	<span class="db-strip-label">In the DB</span>
-	<span class="stat"><strong>{data.dbStats.stories.toLocaleString()}</strong> stories</span>
-	<span class="stat"><strong>{data.dbStats.comments.toLocaleString()}</strong> comments</span>
-	<span class="stat"><strong>{data.dbStats.users.toLocaleString()}</strong> users</span>
-</aside>
-
+<!-- Page header — two-column.
+       Left: title + result summary
+       Right: a single right-rail panel that combines the
+       "In the DB" dataset size with this page's timing badge so
+       both pieces of stats info sit together instead of fighting
+       for visual real-estate. -->
 <section class="page-header">
-	<div>
+	<div class="header-main">
 		<h1>
 			{#if data.q}
 				Results for <q>{data.q}</q>
@@ -123,7 +117,22 @@
 			· page of {data.pageSize}
 		</p>
 	</div>
-	<TimingBadge ms={data.queryMs} label="page + count" />
+
+	<aside class="header-stats" aria-label="Dataset size + page timing">
+		<div class="db-mini">
+			<span class="db-mini-label">In the DB</span>
+			<span class="db-mini-row">
+				<strong>{data.dbStats.stories.toLocaleString()}</strong> stories
+			</span>
+			<span class="db-mini-row">
+				<strong>{data.dbStats.comments.toLocaleString()}</strong> comments
+			</span>
+			<span class="db-mini-row">
+				<strong>{data.dbStats.users.toLocaleString()}</strong> users
+			</span>
+		</div>
+		<TimingBadge ms={data.queryMs} label="page + count" />
+	</aside>
 </section>
 
 <!-- Filter pills, two-line layout:
@@ -261,12 +270,47 @@
 	.page-header {
 		display: flex;
 		align-items: flex-start;
-		gap: var(--s-3);
+		gap: var(--s-4);
 		justify-content: space-between;
-		margin-bottom: var(--s-3);
+		margin-bottom: var(--s-4);
 	}
 	.page-header h1 { margin: 0 0 var(--s-2) 0; font-size: 1.6rem; }
 	.subtitle { color: var(--c-text-muted); margin: 0; font-size: 0.95rem; }
+	.header-main { flex: 1; min-width: 0; }
+	.header-stats {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-end;
+		gap: var(--s-2);
+		flex-shrink: 0;
+	}
+	.db-mini {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-end;
+		gap: 0.15rem;
+		padding: var(--s-2) var(--s-3);
+		border: 1px solid var(--c-border);
+		border-radius: var(--r-md);
+		background: var(--c-surface);
+		min-width: 9.5rem;
+	}
+	.db-mini-label {
+		color: var(--c-text-muted);
+		font-size: 0.68rem;
+		font-family: var(--f-mono);
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
+		margin-bottom: 0.2rem;
+	}
+	.db-mini-row {
+		color: var(--c-text-muted);
+		font-size: 0.82rem;
+	}
+	.db-mini-row strong {
+		color: var(--c-text);
+		margin-right: 0.3rem;
+	}
 
 	.filter-bar {
 		display: flex;
@@ -407,28 +451,6 @@
 		letter-spacing: 0.05em;
 	}
 	.meta-share { margin-left: auto; }
-
-	.db-strip {
-		display: flex;
-		align-items: baseline;
-		flex-wrap: wrap;
-		gap: var(--s-3);
-		padding: var(--s-2) var(--s-3);
-		margin-bottom: var(--s-3);
-		border: 1px solid var(--c-border);
-		border-radius: var(--r-md);
-		background: var(--c-surface);
-		font-size: 0.9rem;
-	}
-	.db-strip-label {
-		color: var(--c-text-muted);
-		font-size: 0.75rem;
-		font-family: var(--f-mono);
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
-	}
-	.db-strip .stat { color: var(--c-text-muted); }
-	.db-strip .stat strong { color: var(--c-text); margin-right: 0.25rem; }
 
 	.pagination {
 		display: flex;
