@@ -44,9 +44,10 @@
 		return s ? `/?${s}` : '/';
 	}
 
-	// Pagination: append the cursor to the CURRENT URL params, so all
-	// filters carry over to page 2+. `nextCursor` is server-prepared
-	// (already URI-encoded JSON).
+	// Pagination URL for `Older →`. Appends the next cursor + bumps
+	// ?page= so the visitor sees a stable page counter even though
+	// the underlying mechanism is cursor-based (no offset cost).
+	// All current filter params carry over.
 	let nextHref = $derived.by(() => {
 		if (!data.nextCursor) return null;
 		const params = new URLSearchParams();
@@ -56,14 +57,43 @@
 		if (data.window && data.window !== 'all') params.set('window', data.window);
 		if (data.by) params.set('by', data.by);
 		params.set('after', data.nextCursor);
+		params.set('page', String((data.page ?? 1) + 1));
 		return `/?${params.toString()}`;
 	});
+
+	// Range labels for the pagination footer: "Showing 51-75 of 210,520"
+	let rangeStart = $derived(((data.page ?? 1) - 1) * data.pageSize + 1);
+	let rangeEnd   = $derived(rangeStart + data.stories.length - 1);
+	let totalPages = $derived(Math.max(1, Math.ceil(data.totalCount / data.pageSize)));
+
+	// `Newer ←` is browser-back when we're not on page 1. Cursor
+	// pagination is forward-only, so the URL history IS the back
+	// stack — easier to use it than to maintain a parallel "back
+	// cursor" param.
+	function newer(e: MouseEvent) {
+		if ((data.page ?? 1) > 1) {
+			e.preventDefault();
+			history.back();
+		}
+	}
 </script>
 
 <svelte:head>
 	<title>shard-db HN Explorer — search Hacker News in milliseconds</title>
 	<meta name="description" content="A live explorer for Hacker News built on shard-db. Browse, filter by type, sort, paginate via shard-db cursors — all in milliseconds." />
 </svelte:head>
+
+<!-- "What's in the DB right now" — compact strip. Three counts in
+     parallel hit kf-header metadata (O(1)), cheap enough to fire on
+     every home load. Same numbers visitors used to see in the big
+     card on the prior home page, just trimmed so the browse list
+     becomes the page's focus. -->
+<aside class="db-strip" aria-label="Dataset size">
+	<span class="db-strip-label">In the DB</span>
+	<span class="stat"><strong>{data.dbStats.stories.toLocaleString()}</strong> stories</span>
+	<span class="stat"><strong>{data.dbStats.comments.toLocaleString()}</strong> comments</span>
+	<span class="stat"><strong>{data.dbStats.users.toLocaleString()}</strong> users</span>
+</aside>
 
 <section class="page-header">
 	<div>
@@ -160,15 +190,30 @@
 		{/each}
 	</ol>
 
-	<!-- Cursor-based pagination. Forward-only — to go back, use the
-	     browser back button (the URL history is the cursor stack).
-	     The `?after=...` in the URL is the shard-db cursor JSON
-	     (URL-encoded) — open the address bar to see it. -->
+	<!-- Cursor-based pagination footer. Range labels make it clear
+	     where the visitor is; Newer/Older buttons mirror the standard
+	     numbered pagination feel but use shard-db's forward cursor
+	     under the hood (so deep pages stay O(limit), not O(offset)).
+	     `Newer ←` uses history.back() because URL history IS the
+	     back-cursor stack — cleaner than threading a parallel param. -->
 	<nav class="pagination" aria-label="Pagination">
+		<a
+			href="/"
+			class="page-link page-prev"
+			class:disabled={(data.page ?? 1) <= 1}
+			aria-disabled={(data.page ?? 1) <= 1}
+			onclick={newer}
+		>← Newer</a>
+
+		<div class="page-info">
+			<div class="page-num">Page {data.page ?? 1}<span class="of">of {totalPages.toLocaleString()}</span></div>
+			<div class="page-range">{rangeStart.toLocaleString()}–{rangeEnd.toLocaleString()} of {data.totalCount.toLocaleString()}</div>
+		</div>
+
 		{#if nextHref}
 			<a href={nextHref} class="page-link page-next">Older →</a>
 		{:else}
-			<span class="page-link page-end">End of results</span>
+			<span class="page-link page-end" aria-disabled="true">End</span>
 		{/if}
 	</nav>
 {/if}
@@ -277,26 +322,82 @@
 		padding: 0 0.35rem;
 	}
 
+	.db-strip {
+		display: flex;
+		align-items: baseline;
+		flex-wrap: wrap;
+		gap: var(--s-3);
+		padding: var(--s-2) var(--s-3);
+		margin-bottom: var(--s-3);
+		border: 1px solid var(--c-border);
+		border-radius: var(--r-md);
+		background: var(--c-surface);
+		font-size: 0.9rem;
+	}
+	.db-strip-label {
+		color: var(--c-text-muted);
+		font-size: 0.75rem;
+		font-family: var(--f-mono);
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+	}
+	.db-strip .stat { color: var(--c-text-muted); }
+	.db-strip .stat strong { color: var(--c-text); margin-right: 0.25rem; }
+
 	.pagination {
 		display: flex;
-		justify-content: center;
+		align-items: center;
+		justify-content: space-between;
+		gap: var(--s-3);
 		margin-top: var(--s-5);
+		padding-top: var(--s-3);
+		border-top: 1px solid var(--c-border);
 	}
 	.page-link {
-		padding: 0.4rem 0.8rem;
+		padding: 0.4rem 0.9rem;
 		border: 1px solid var(--c-border);
 		border-radius: var(--r-md);
 		color: var(--c-text);
 		text-decoration: none;
 		font-family: var(--f-mono);
 		font-size: 0.9rem;
+		min-width: 5rem;
+		text-align: center;
 	}
-	.page-link:hover {
+	.page-link:hover:not(.disabled):not(.page-end) {
 		border-color: var(--c-accent);
+		color: var(--c-accent);
 		text-decoration: none;
 	}
-	.page-end {
+	.page-link.disabled,
+	.page-link.page-end {
 		color: var(--c-text-muted);
-		cursor: default;
+		cursor: not-allowed;
+		opacity: 0.5;
+		pointer-events: none;
+	}
+	.page-info {
+		text-align: center;
+		flex: 1;
+		min-width: 0;
+	}
+	.page-num {
+		font-family: var(--f-mono);
+		color: var(--c-text);
+		font-size: 0.9rem;
+	}
+	.page-num .of {
+		color: var(--c-text-muted);
+		margin-left: 0.4rem;
+		font-size: 0.85rem;
+	}
+	.page-range {
+		color: var(--c-text-muted);
+		font-size: 0.78rem;
+		margin-top: 0.15rem;
+	}
+	@media (max-width: 640px) {
+		.page-link { min-width: 3.5rem; padding: 0.4rem 0.5rem; }
+		.page-num .of { display: none; }
 	}
 </style>

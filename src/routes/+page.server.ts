@@ -106,25 +106,43 @@ export const load: PageServerLoad = async ({ url }) => {
 		cursor: cursor ?? null
 	};
 
+	// Page number for display only — server doesn't use it; the cursor
+	// is what actually drives pagination. UI increments on each `Older
+	// →` click; browser back decrements naturally via URL history.
+	const pageRaw = parseInt(url.searchParams.get('page') ?? '1', 10);
+	const page = isNaN(pageRaw) || pageRaw < 1 ? 1 : pageRaw;
+
 	const t0 = performance.now();
 
-	// Two queries in parallel: page of results (cursor-paginated) +
-	// total count for the result-bar. Both filter-first via the
-	// composed criteria.
-	const [pageResp, countResp] = await Promise.all([
+	// Five queries in parallel: page of results + page-scoped count +
+	// three top-level "what's in the DB" counts for the stats strip.
+	// The three top-level counts hit kf header metadata (O(1) per
+	// object) so they're <10ms cold and basically free warm — cheap
+	// enough to fire on every home-page load.
+	const [pageResp, countResp, storiesTotal, commentsTotal, usersTotal] = await Promise.all([
 		shardDb.query(findQuery),
-		shardDb.query({ mode: 'count', dir: 'hn', object: 'stories', criteria })
+		shardDb.query({ mode: 'count', dir: 'hn', object: 'stories', criteria }),
+		shardDb.query<number>({ mode: 'count', dir: 'hn', object: 'stories' }),
+		shardDb.query<number>({ mode: 'count', dir: 'hn', object: 'comments' }),
+		shardDb.query<number>({ mode: 'count', dir: 'hn', object: 'users' })
 	]);
 
 	const queryMs = performance.now() - t0;
 
+	const dbStats = {
+		stories:  isError(storiesTotal)  ? 0 : (storiesTotal  as number),
+		comments: isError(commentsTotal) ? 0 : (commentsTotal as number),
+		users:    isError(usersTotal)    ? 0 : (usersTotal    as number)
+	};
+
 	if (isError(pageResp) || isError(countResp)) {
 		const err = isError(pageResp) ? pageResp.error : (countResp as { error: string }).error;
 		return {
-			q, type, sort, window: win, by,
+			q, type, sort, window: win, by, page,
 			stories: [], totalCount: 0, queryMs,
 			pageSize: PAGE_SIZE,
 			nextCursor: null as string | null,
+			dbStats,
 			error: err
 		};
 	}
@@ -145,10 +163,11 @@ export const load: PageServerLoad = async ({ url }) => {
 	const totalCount = countResp as number;
 
 	return {
-		q, type, sort, window: win, by,
+		q, type, sort, window: win, by, page,
 		stories, totalCount, queryMs,
 		pageSize: PAGE_SIZE,
 		nextCursor,
+		dbStats,
 		query: findQuery  // so /stats-style "show query" works if we want
 	};
 };
