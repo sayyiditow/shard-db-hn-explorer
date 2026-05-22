@@ -142,11 +142,16 @@
 	.brand-text {
 		font-size: 0.95rem;
 	}
+	/* Search input owns whatever horizontal space the logo and nav
+	   don't claim. `flex: 1` + no max-width = the input stretches
+	   from the logo's right edge to the nav's left edge, which
+	   pushes the rightmost nav item (theme toggle) flush against
+	   the content column's right edge. Previously capped at 520px,
+	   leaving a visible gap between the input and the nav. */
 	.search {
 		flex: 1;
 		display: flex;
 		align-items: stretch;
-		max-width: 520px;
 		border: 1px solid var(--c-border);
 		border-radius: var(--r-md);
 		background: var(--c-bg);
