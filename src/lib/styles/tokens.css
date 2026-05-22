@@ -38,7 +38,10 @@
 	--r-lg: 8px;
 
 	/* Layout */
-	--page-max: 1200px;
+	/* 1080px keeps the story-list comfortable to read without
+	   stretching titles across the whole viewport. Header content
+	   and main + footer all use this same max so they line up. */
+	--page-max: 1080px;
 }
 
 /* Dark palette — applied via system preference OR explicit
