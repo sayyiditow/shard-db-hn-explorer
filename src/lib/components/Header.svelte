@@ -7,7 +7,11 @@
 	let path = $derived(page.url.pathname as string);
 
 	// Pre-fill search input with current ?q= when the user is already on /search
-	let initialQ = $derived(path === '/search' ? (page.url.searchParams.get('q') ?? '') : '');
+	// Pre-fill input on `/` (the unified home/browse/search page).
+	// Legacy `/search?q=` URLs still work — that route now redirects
+	// to `/?q=` so the input pre-fills there too via SvelteKit's
+	// post-redirect URL.
+	let initialQ = $derived(path === '/' ? (page.url.searchParams.get('q') ?? '') : '');
 	let q = $state('');
 	$effect(() => {
 		q = initialQ;
@@ -50,7 +54,7 @@
 		<form
 			class="search"
 			class:invalid={qTooShort}
-			action="/search"
+			action="/"
 			method="get"
 			role="search"
 			onsubmit={onSubmit}
