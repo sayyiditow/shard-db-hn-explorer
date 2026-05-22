@@ -14,8 +14,13 @@ const WINDOW_MS: Record<Window, number | null> = {
 const TOP_STORIES_LIMIT = 30;
 
 export const load: PageServerLoad = async ({ url }) => {
-	const win = (url.searchParams.get('window') ?? '24h') as Window;
-	const windowMs = WINDOW_MS[win] ?? WINDOW_MS['24h'];
+	const rawWin = url.searchParams.get('window') ?? '24h';
+	// `??` would clobber the intentional `null` we store for `all`
+	// (meaning "no upper bound") and silently turn All-time into
+	// Past-24h. Use an `in` check so a genuinely unknown ?window=
+	// value falls back to 24h while `all` keeps its null sentinel.
+	const win: Window = (rawWin in WINDOW_MS ? rawWin : '24h') as Window;
+	const windowMs = WINDOW_MS[win];
 
 	const now = Date.now();
 	const since = windowMs == null ? 0 : now - windowMs;
