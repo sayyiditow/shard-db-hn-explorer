@@ -80,9 +80,12 @@ function toMs(unixSec: bigint | number | undefined): number {
 // One connected client per worker. Each bulk-insert call is sequential
 // on a single connection; we get parallelism by holding N connections
 // open and round-robining work across them.
-// Local dev convention matches scripts/dev.sh — 19199 not the
-// shard-db binary default 9199.
-const DEFAULT_PORT = 19199;
+// Default to the shard-db binary's own default (9199) so a manually
+// started daemon Just Works — matches setup-schema.ts + sample-load.ts.
+// When running on top of `bun run app`'s dev daemon (which uses 19199
+// to avoid clobbering any 9199 daemon), set SHARD_DB_PORT=19199
+// explicitly before invoking bulk-load.
+const DEFAULT_PORT = 9199;
 const SHARD_HOST = process.env.SHARD_DB_HOST ?? '127.0.0.1';
 const SHARD_PORT = process.env.SHARD_DB_PORT ? Number(process.env.SHARD_DB_PORT) : DEFAULT_PORT;
 const SHARD_TOKEN = process.env.SHARD_DB_TOKEN;
