@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { afterNavigate } from '$app/navigation';
+	import { page } from '$app/state';
 	import TimingBadge from '$lib/components/TimingBadge.svelte';
 	import Comment from '$lib/components/Comment.svelte';
 	import { relativeTime, absoluteTime, domainOf, hnItemUrl, pluralise } from '$lib/hn/format';
@@ -6,8 +8,25 @@
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
-	let storyHasText = $derived(false); // HN ask-style stories store body in `text`, but our schema doesn't keep it — could add later
+	let storyHasText = $derived(false);
 	let domain = $derived(domainOf(data.story.url));
+
+	afterNavigate(() => {
+		const hash = page.url.hash;
+		if (!hash) return;
+		const id = hash.slice(1);
+
+		let i = 0;
+		(function retry() {
+			const el = document.getElementById(id);
+			if (el) {
+				el.scrollIntoView({ behavior: 'instant', block: 'start' });
+				el.classList.add('highlight');
+			} else if (++i < 100) {
+				requestAnimationFrame(retry);
+			}
+		})();
+	});
 </script>
 
 <svelte:head>
@@ -129,6 +148,13 @@
 		border-left: 0;
 		padding-left: 0;
 		margin: 0;
+	}
+	:global(.comment.highlight) {
+		animation: comment-fade 3s ease-out forwards;
+	}
+	@keyframes comment-fade {
+		0%   { background-color: var(--c-accent-soft); }
+		100% { background-color: transparent; }
 	}
 	.thread > :global(.comment.depth-0:first-child) {
 		border-top: 0;
