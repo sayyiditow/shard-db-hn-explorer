@@ -102,9 +102,13 @@
 		border-bottom: 1px solid var(--c-border);
 		backdrop-filter: saturate(180%) blur(4px);
 	}
+	/* Header bar spans edge-to-edge of the viewport, unlike <main>
+	   which centres at --page-max. This puts the search input + nav
+	   close to the browser chrome (like Algolia's HN UI). Vertical
+	   padding stays modest; horizontal padding nudges content off
+	   the very edge but keeps the bar visually wider than the
+	   content column below. */
 	.bar {
-		max-width: var(--page-max);
-		margin: 0 auto;
 		padding: var(--s-3) var(--s-4);
 		display: flex;
 		align-items: center;

@@ -38,12 +38,7 @@
 	--r-lg: 8px;
 
 	/* Layout */
-	/* 1440 matches typical large-laptop viewports (1440-1920) so the
-	   browse list breathes instead of feeling cramped in a narrow
-	   centre column. Header bar uses the same max so the search input
-	   spans equally and aligns with the content below pixel-for-
-	   pixel. */
-	--page-max: 1440px;
+	--page-max: 1200px;
 }
 
 /* Dark palette — applied via system preference OR explicit
