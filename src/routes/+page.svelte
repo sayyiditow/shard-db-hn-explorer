@@ -126,8 +126,10 @@
 	<TimingBadge ms={data.queryMs} label="page + count" />
 </section>
 
-<!-- Filter pills, Algolia-style. Each pill is a link with the
-     relevant param patched on top of the current URL state. -->
+<!-- Filter pills, two-line layout:
+       Row 1: Category (the primary "what am I looking at" axis)
+       Row 2: Sort + Window combined, separated by a thin divider
+     Author filter chip drops in below Row 2 when active. -->
 <div class="filter-bar" role="navigation" aria-label="Filters">
 	<div class="filter-row">
 		<span class="filter-label">Category</span>
@@ -137,15 +139,14 @@
 			>{c.label}</a>
 		{/each}
 	</div>
-	<div class="filter-row">
+	<div class="filter-row filter-row-split">
 		<span class="filter-label">Sort</span>
 		{#each SORTS as s (s.value)}
 			<a href={pillHref({ sort: s.value })}
 			   class:active={data.sort === s.value}
 			>{s.label}</a>
 		{/each}
-	</div>
-	<div class="filter-row">
+		<span class="filter-divider" aria-hidden="true"></span>
 		<span class="filter-label">Window</span>
 		{#each WINDOWS as w (w.value)}
 			<a href={pillHref({ window: w.value })}
@@ -199,11 +200,11 @@
 						</svg>
 						<strong>{s.score}</strong> points
 					</span>
-					<span class="meta meta-author" title="Author">
+					<span class="meta meta-author" title="Author profile">
 						<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
 							<path fill="currentColor" d="M8 8a3 3 0 100-6 3 3 0 000 6zm0 1c-3 0-6 1.5-6 4v2h12v-2c0-2.5-3-4-6-4z"/>
 						</svg>
-						by <a href={pillHref({ by: s.by })}>{s.by}</a>
+						by <a href="/u/{s.by}">{s.by}</a>
 					</span>
 					<span class="meta meta-time" title={absoluteTime(s.time)}>
 						<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
@@ -269,18 +270,27 @@
 
 	.filter-bar {
 		display: flex;
-		flex-wrap: wrap;
-		gap: var(--s-2) var(--s-3);
+		flex-direction: column;
+		gap: var(--s-2);
 		margin-bottom: var(--s-4);
-		padding: var(--s-2) var(--s-3);
+		padding: var(--s-3);
 		border: 1px solid var(--c-border);
 		border-radius: var(--r-md);
 		background: var(--c-surface);
 	}
 	.filter-row {
 		display: flex;
+		flex-wrap: wrap;
 		align-items: center;
 		gap: 0.35rem;
+	}
+	/* Visual divider between Sort and Window groups inside row 2. */
+	.filter-divider {
+		display: inline-block;
+		width: 1px;
+		height: 1.1rem;
+		background: var(--c-border);
+		margin: 0 0.4rem;
 	}
 	.filter-label {
 		color: var(--c-text-muted);
