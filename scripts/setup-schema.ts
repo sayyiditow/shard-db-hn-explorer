@@ -49,16 +49,30 @@ async function main() {
 		max_key: 12,
 		fields: [
 			'by:varchar:32',
-			'time:timestamp',           // HN epoch seconds * 1000 = ms
+			'time:timestamp',                                   // HN epoch seconds * 1000 = ms
 			'score:int',
-			'url:varchar:2048',         // bumped from 512 — HN URLs with tracking params
+			'url:varchar:2048',                                 // bumped from 512 — HN URLs with tracking params
 			'title:varchar:512',
 			'descendants:int',
-			'type:varchar:8',
-			'deleted:bool',
-			'dead:bool'
+			'type:enum(story,job,poll,comment,pollopt)',        // 1-byte stored, auto-bitmap (was varchar:8)
+			'deleted:bool',                                     // auto-bitmap
+			'dead:bool'                                         // auto-bitmap
 		],
-		indexes: ['by', 'time', 'score', 'type', 'by+time', 'time+score', 'type+time']
+		// title:trigram for substring search on /search; planner picks btree-leaf
+		// for short patterns and trigram for longer (>= 6 chars). dead/deleted
+		// auto-bitmap by being bool fields. type auto-bitmap by being enum.
+		indexes: [
+			'by',
+			'time',
+			'score',
+			'type',
+			'dead',
+			'deleted',
+			'title:trigram',
+			'by+time',
+			'time+score',
+			'type+time'
+		]
 	});
 
 	await step('comments', {
@@ -69,14 +83,27 @@ async function main() {
 		max_key: 12,
 		fields: [
 			'by:varchar:32',
-			'time:timestamp',           // ms; converted from HN seconds at insert
+			'time:timestamp',                                   // ms; converted from HN seconds at insert
 			'parent:int',
 			'story_root:int',
-			'text:varchar:32768',       // bumped from 8192 — long-form HN comments do exist
-			'deleted:bool',
-			'dead:bool'
+			'text:varchar:32768',                               // bumped from 8192 — long-form HN comments do exist
+			'deleted:bool',                                     // auto-bitmap
+			'dead:bool'                                         // auto-bitmap
 		],
-		indexes: ['by', 'time', 'parent', 'story_root', 'by+time', 'story_root+time']
+		// No trigram on comment text — at 30M-comment scale the .tg files
+		// would exceed 100 GB. Comment search is "comments by X" (by:btree)
+		// or "comments on story Y" (story_root:btree); full-text comment
+		// search is out of scope for shard-db's positioning.
+		indexes: [
+			'by',
+			'time',
+			'parent',
+			'story_root',
+			'dead',
+			'deleted',
+			'by+time',
+			'story_root+time'
+		]
 	});
 
 	await step('users', {
