@@ -102,12 +102,17 @@
 		border-bottom: 1px solid var(--c-border);
 		backdrop-filter: saturate(180%) blur(4px);
 	}
-	/* Header bar spans viewport edge-to-edge (unlike <main>, which
-	   centres at --page-max). Horizontal padding s-6 = 2rem gives
-	   the logo and nav a comfortable inset from the chrome — the
-	   previous s-4 felt cramped against the screen edge. */
+	/* Header inner content aligns with <main> below: centred at
+	   --page-max with matching horizontal padding so logo / search /
+	   nav sit in the same column as the story list. The header's
+	   <header> background still spans full-viewport for the visual
+	   "top bar" band; only the inner .bar is constrained. Within
+	   the bar, the search input flex-grows to fill the gap between
+	   the (left-anchored) logo and the (right-anchored) nav. */
 	.bar {
-		padding: var(--s-3) var(--s-6);
+		max-width: var(--page-max);
+		margin: 0 auto;
+		padding: var(--s-3) var(--s-4);
 		display: flex;
 		align-items: center;
 		gap: var(--s-4);
