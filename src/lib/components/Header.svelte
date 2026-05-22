@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/state';
+	import ThemeToggle from './ThemeToggle.svelte';
 
 	// Cast — `pathname` is typed against the currently-declared route map
 	// in SvelteKit; comparing to routes that don't yet exist as files is
@@ -83,8 +84,11 @@
 
 		<nav>
 			<a href="/trending" class:active={path === '/trending'}>Trending</a>
-			<a href="/jobs" class:active={path === '/jobs'}>Jobs</a>
 			<a href="/stats" class:active={path === '/stats'}>Stats</a>
+			<!-- Jobs nav link removed: /?category=job covers the same
+			     experience inside the unified home page. /jobs URL
+			     still redirects so deep links don't 404. -->
+			<ThemeToggle />
 		</nav>
 	</div>
 </header>
