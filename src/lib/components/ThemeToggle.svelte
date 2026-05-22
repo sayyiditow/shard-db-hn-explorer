@@ -1,59 +1,52 @@
 <script lang="ts">
-	// Manual theme toggle — overrides `prefers-color-scheme`. Three
-	// states cycle in order: `auto` (follow system) → `light` → `dark`
-	// → `auto` again. Persisted to localStorage so the choice survives
-	// page loads.
+	// Binary theme toggle — light ↔ dark. First load resolves the
+	// initial state from localStorage; on a fresh visitor with no
+	// stored choice, we follow prefers-color-scheme. After that the
+	// toggle is the only source of truth.
 	//
-	// CSS in tokens.css does the actual switch via `:root[data-theme=...]`
-	// selectors. This component just sets / removes the attribute on
-	// <html>. SSR-safe: server renders without the attribute, client
-	// hydrates from localStorage on mount.
+	// CSS in tokens.css does the actual switch via `:root[data-theme=…]`.
+	// This component only sets / removes the attribute on <html>.
+	// SSR-safe: server renders without the attribute, client hydrates
+	// from localStorage on mount.
 	import { onMount } from 'svelte';
 
-	type Mode = 'auto' | 'light' | 'dark';
-	let mode: Mode = $state('auto');
+	type Mode = 'light' | 'dark';
+	let mode: Mode = $state('dark');
 
 	const STORAGE_KEY = 'hn-explorer-theme';
-	const ORDER: Mode[] = ['auto', 'light', 'dark'];
 
 	function apply(m: Mode) {
-		const root = document.documentElement;
-		if (m === 'auto') {
-			root.removeAttribute('data-theme');
-		} else {
-			root.setAttribute('data-theme', m);
-		}
+		document.documentElement.setAttribute('data-theme', m);
 	}
 
 	onMount(() => {
 		const stored = localStorage.getItem(STORAGE_KEY) as Mode | null;
-		if (stored && ORDER.includes(stored)) {
+		if (stored === 'light' || stored === 'dark') {
 			mode = stored;
-			apply(stored);
+		} else {
+			mode = window.matchMedia('(prefers-color-scheme: light)').matches
+				? 'light'
+				: 'dark';
 		}
+		apply(mode);
 	});
 
-	function cycle() {
-		const idx = ORDER.indexOf(mode);
-		mode = ORDER[(idx + 1) % ORDER.length];
+	function toggle() {
+		mode = mode === 'dark' ? 'light' : 'dark';
 		try { localStorage.setItem(STORAGE_KEY, mode); } catch { /* ignore quota */ }
 		apply(mode);
 	}
 
-	const icon = $derived(mode === 'light' ? '☀' : mode === 'dark' ? '☾' : '◐');
-	const label = $derived(
-		mode === 'light' ? 'Light theme' :
-		mode === 'dark'  ? 'Dark theme'  :
-		'Auto theme (follow system)'
-	);
+	const icon = $derived(mode === 'dark' ? '☾' : '☀');
+	const label = $derived(mode === 'dark' ? 'Switch to light theme' : 'Switch to dark theme');
 </script>
 
 <button
 	type="button"
 	class="theme-toggle"
-	onclick={cycle}
-	aria-label={`Theme: ${label}. Click to cycle.`}
-	title={`${label} · click to cycle`}
+	onclick={toggle}
+	aria-label={label}
+	title={label}
 >
 	<span aria-hidden="true">{icon}</span>
 </button>

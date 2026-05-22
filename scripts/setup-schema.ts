@@ -53,6 +53,7 @@ async function main() {
 			'score:int',
 			'url:varchar:2048',                                 // bumped from 512 — HN URLs with tracking params
 			'title:varchar:512',
+			'text:varchar:32768',                               // self-post body (Ask HN, polls). Empty for link-only stories.
 			'descendants:int',
 			'type:enum(story,job,poll,comment,pollopt)',        // 1-byte stored, auto-bitmap (was varchar:8)
 			'deleted:bool',                                     // auto-bitmap

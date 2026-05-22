@@ -240,6 +240,10 @@ async function loadItems(pool: ShardDbClient[]): Promise<{ stories: number; comm
 						score: n(r.score),
 						url: r.url ?? '',
 						title: r.title ?? '',
+						// Self-post body — Ask HN / poll / job listings often have
+						// content in `text` instead of (or alongside) `url`. Empty
+						// string for link-only stories.
+						text: r.text ?? '',
 						descendants: n(r.descendants),
 						type: r.type ?? 'story',
 						deleted: !!r.deleted,
