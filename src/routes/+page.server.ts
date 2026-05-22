@@ -1,5 +1,5 @@
 import { shardDb, isError } from '$lib/shard-db/client';
-import type { Story } from '$lib/hn/types';
+import type { Story, Comment } from '$lib/hn/types';
 import type { PageServerLoad } from './$types';
 
 /**
@@ -43,12 +43,13 @@ const HOT_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 
 /** Category combines `type` (enum bitmap) with optional title prefix
  *  to surface HN's signature derived categories (Ask HN, Show HN).
- *  - story / job / poll → straight enum eq
- *  - ask  → type=story AND title starts_with "Ask HN"
- *  - show → type=story AND title starts_with "Show HN"
- *  - ''   → no category filter (everything except pollopt) */
-type Category = '' | 'story' | 'job' | 'poll' | 'ask' | 'show';
-const CATEGORIES = new Set<Category>(['', 'story', 'job', 'poll', 'ask', 'show']);
+ *  - story / job / poll → straight enum eq on stories object
+ *  - ask  → stories WHERE title starts_with "Ask HN"
+ *  - show → stories WHERE title starts_with "Show HN"
+ *  - comment → switches source object to `comments` entirely
+ *  - ''   → no category filter (stories, except pollopt) */
+type Category = '' | 'story' | 'job' | 'poll' | 'ask' | 'show' | 'comment';
+const CATEGORIES = new Set<Category>(['', 'story', 'job', 'poll', 'ask', 'show', 'comment']);
 
 export const load: PageServerLoad = async ({ url }) => {
 	const q         = (url.searchParams.get('q')         ?? '').trim();
@@ -62,12 +63,26 @@ export const load: PageServerLoad = async ({ url }) => {
 	const after     = (url.searchParams.get('after')     ?? '').trim();
 
 	const category: Category = CATEGORIES.has(catRaw as Category) ? (catRaw as Category) : '';
+
+	// Source object depends on category. Comments live in their own
+	// object with a different schema (no score, no title, no url) so
+	// the rest of the load function branches on this.
+	const sourceObject: 'stories' | 'comments' = category === 'comment' ? 'comments' : 'stories';
+
 	const sort: Sort =
 		sortRaw === 'newest' ? 'newest'
 		: sortRaw === 'hot' ? 'hot'
 		: 'popularity';
 	const win  = winRaw in WINDOW_MS ? winRaw : 'all';
-	const order_by = SORT_FIELDS[sort];
+
+	// Comments don't carry a score field — fall back to time-desc for
+	// any sort that's not explicitly "newest" on the comments source.
+	// Otherwise we'd try to order_by score on the comments object and
+	// shard-db would reject the missing field.
+	let order_by = SORT_FIELDS[sort];
+	if (sourceObject === 'comments' && (sort === 'popularity' || sort === 'hot')) {
+		order_by = 'time';
+	}
 
 	// Build criteria. Filter-first planner (shard-db 2026.05.7.x)
 	// composes these into a KeySet so the cursor walk of order_by
@@ -79,31 +94,34 @@ export const load: PageServerLoad = async ({ url }) => {
 	criteria.push({ field: 'dead',    op: 'eq', value: 'false' });
 	criteria.push({ field: 'deleted', op: 'eq', value: 'false' });
 
-	// Category → up to two criteria (type eq + optional title starts_with).
+	// Category → up to two criteria (type eq + optional title starts_with),
+	// OR routes to the comments object (which has no `type` field).
 	switch (category) {
 		case 'story': criteria.push({ field: 'type', op: 'eq', value: 'story' }); break;
 		case 'job':   criteria.push({ field: 'type', op: 'eq', value: 'job'   }); break;
 		case 'poll':  criteria.push({ field: 'type', op: 'eq', value: 'poll'  }); break;
 		case 'ask':
-			// Ask HN posts → type=story AND title starts with "Ask HN"
-			// (case-insensitive, since some posts use "Ask hn", "ASK HN", etc).
-			// We use case-sensitive starts_with on the literal `Ask HN`
-			// since 99%+ of legitimate Ask HN posts use that exact prefix.
-			criteria.push({ field: 'type',  op: 'eq',          value: 'story' });
-			criteria.push({ field: 'title', op: 'starts',      value: 'Ask HN' });
+			criteria.push({ field: 'type',  op: 'eq',     value: 'story' });
+			criteria.push({ field: 'title', op: 'starts', value: 'Ask HN' });
 			break;
 		case 'show':
-			criteria.push({ field: 'type',  op: 'eq',          value: 'story' });
-			criteria.push({ field: 'title', op: 'starts',      value: 'Show HN' });
+			criteria.push({ field: 'type',  op: 'eq',     value: 'story' });
+			criteria.push({ field: 'title', op: 'starts', value: 'Show HN' });
+			break;
+		case 'comment':
+			// No type filter on comments — every record in the comments
+			// object is by definition a comment.
 			break;
 		default:
-			// No explicit category — hide pollopts (poll-option entries
-			// aren't independent items, just children of poll parents).
+			// Stories source, no explicit category — hide pollopts.
 			criteria.push({ field: 'type', op: 'in', value: 'story,job,poll' });
 	}
 
+	// Substring filter target depends on source: title for stories,
+	// text for comments. Same trigram index machinery on both fields.
 	if (q.length >= 3) {
-		criteria.push({ field: 'title', op: 'icontains', value: q });
+		const field = sourceObject === 'comments' ? 'text' : 'title';
+		criteria.push({ field, op: 'icontains', value: q });
 	}
 
 	if (by) {
@@ -142,7 +160,7 @@ export const load: PageServerLoad = async ({ url }) => {
 	const findQuery: Record<string, unknown> = {
 		mode: 'find',
 		dir: 'hn',
-		object: 'stories',
+		object: sourceObject,
 		criteria,
 		order_by,
 		order: 'desc',
@@ -165,7 +183,7 @@ export const load: PageServerLoad = async ({ url }) => {
 	// enough to fire on every home-page load.
 	const [pageResp, countResp, storiesTotal, commentsTotal, usersTotal] = await Promise.all([
 		shardDb.query(findQuery),
-		shardDb.query({ mode: 'count', dir: 'hn', object: 'stories', criteria }),
+		shardDb.query({ mode: 'count', dir: 'hn', object: sourceObject, criteria }),
 		shardDb.query<number>({ mode: 'count', dir: 'hn', object: 'stories' }),
 		shardDb.query<number>({ mode: 'count', dir: 'hn', object: 'comments' }),
 		shardDb.query<number>({ mode: 'count', dir: 'hn', object: 'users' })
@@ -183,7 +201,9 @@ export const load: PageServerLoad = async ({ url }) => {
 		const err = isError(pageResp) ? pageResp.error : (countResp as { error: string }).error;
 		return {
 			q, category, sort, window: win, by, page,
-			stories: [], totalCount: 0, queryMs,
+			source: sourceObject,
+			items: [] as Array<Story | Comment>,
+			totalCount: 0, queryMs,
 			pageSize: PAGE_SIZE,
 			nextCursor: null as string | null,
 			dbStats,
@@ -193,22 +213,26 @@ export const load: PageServerLoad = async ({ url }) => {
 
 	// Cursor mode returns {rows: [...], cursor: {...} | null}. Without
 	// cursor it returns a bare array. Normalise both shapes.
-	let rows: Array<{ key: string; value: Omit<Story, 'key'> }>;
+	type ValueRow = { key: string; value: Record<string, unknown> };
+	let rows: ValueRow[];
 	let nextCursor: string | null = null;
 	if (Array.isArray(pageResp)) {
-		rows = pageResp as Array<{ key: string; value: Omit<Story, 'key'> }>;
+		rows = pageResp as ValueRow[];
 	} else {
-		const cr = pageResp as { rows: Array<{ key: string; value: Omit<Story, 'key'> }>; cursor: object | null };
+		const cr = pageResp as { rows: ValueRow[]; cursor: object | null };
 		rows = cr.rows;
 		nextCursor = cr.cursor ? encodeURIComponent(JSON.stringify(cr.cursor)) : null;
 	}
 
-	const stories: Story[] = rows.map((r) => ({ key: r.key, ...r.value }));
+	const items: Array<Story | Comment> = rows.map((r) =>
+		({ key: r.key, ...r.value } as Story | Comment)
+	);
 	const totalCount = countResp as number;
 
 	return {
 		q, category, sort, window: win, by, page,
-		stories, totalCount, queryMs,
+		source: sourceObject,
+		items, totalCount, queryMs,
 		pageSize: PAGE_SIZE,
 		nextCursor,
 		dbStats,

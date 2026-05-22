@@ -12,12 +12,13 @@
 	// Jobs. Discovery flow puts Show/Ask near the top because they're
 	// what visitors look for.
 	const CATEGORIES = [
-		{ value: '',      label: 'All' },
-		{ value: 'story', label: 'Stories' },
-		{ value: 'show',  label: 'Show HN' },
-		{ value: 'ask',   label: 'Ask HN' },
-		{ value: 'poll',  label: 'Polls' },
-		{ value: 'job',   label: 'Jobs' }
+		{ value: '',        label: 'All' },
+		{ value: 'story',   label: 'Stories' },
+		{ value: 'show',    label: 'Show HN' },
+		{ value: 'ask',     label: 'Ask HN' },
+		{ value: 'poll',    label: 'Polls' },
+		{ value: 'job',     label: 'Jobs' },
+		{ value: 'comment', label: 'Comments' }
 	];
 	const SORTS = [
 		{ value: 'popularity', label: 'Popularity' },
@@ -72,7 +73,7 @@
 
 	// Range labels for the pagination footer: "Showing 51-75 of 210,520"
 	let rangeStart = $derived(((data.page ?? 1) - 1) * data.pageSize + 1);
-	let rangeEnd   = $derived(rangeStart + data.stories.length - 1);
+	let rangeEnd   = $derived(rangeStart + data.items.length - 1);
 	let totalPages = $derived(Math.max(1, Math.ceil(data.totalCount / data.pageSize)));
 
 	// `Newer ←` is browser-back when we're not on page 1. Cursor
@@ -109,12 +110,19 @@
 		</h1>
 		<p class="subtitle">
 			<strong>{data.totalCount.toLocaleString()}</strong> matching
-			{data.category === 'job'  ? 'job'  :
-			 data.category === 'poll' ? 'poll' :
-			 data.category === 'ask'  ? 'Ask HN post' :
-			 data.category === 'show' ? 'Show HN post' :
-			 'story'}{data.totalCount === 1 ? '' : 's'}
-			· page of {data.pageSize}
+			{#if data.category === 'job'}
+				{data.totalCount === 1 ? 'job' : 'jobs'}
+			{:else if data.category === 'poll'}
+				{data.totalCount === 1 ? 'poll' : 'polls'}
+			{:else if data.category === 'ask'}
+				{data.totalCount === 1 ? 'Ask HN post' : 'Ask HN posts'}
+			{:else if data.category === 'show'}
+				{data.totalCount === 1 ? 'Show HN post' : 'Show HN posts'}
+			{:else if data.category === 'comment'}
+				{data.totalCount === 1 ? 'comment' : 'comments'}
+			{:else}
+				{data.totalCount === 1 ? 'story' : 'stories'}
+			{/if}
 		</p>
 	</div>
 
@@ -176,16 +184,48 @@
 
 {#if data.error}
 	<p class="error">{data.error}</p>
-{:else if data.stories.length === 0}
+{:else if data.items.length === 0}
 	<p class="muted empty-msg">
 		No results.
 		{#if data.q || data.category || data.window !== 'all' || data.by}
 			Try widening the filters.
 		{/if}
 	</p>
+{:else if data.source === 'comments'}
+	<!-- Comments source: each row shows author + snippet + thread link.
+	     No score, no URL, no title — comments are different beasts. -->
+	<ol class="story-list">
+		{#each data.items as c (c.key)}
+			<li class="story">
+				<div class="comment-body">
+					{commentSnippet(c.text ?? '', 320)}
+				</div>
+				<div class="byline">
+					<span class="meta meta-author" title="Author profile">
+						<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
+							<path fill="currentColor" d="M8 8a3 3 0 100-6 3 3 0 000 6zm0 1c-3 0-6 1.5-6 4v2h12v-2c0-2.5-3-4-6-4z"/>
+						</svg>
+						by <a href="/u/{c.by}">{c.by}</a>
+					</span>
+					<span class="meta meta-time" title={absoluteTime(c.time)}>
+						<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
+							<path fill="none" stroke="currentColor" stroke-width="1.4" d="M8 14A6 6 0 108 2a6 6 0 000 12zM8 4.5V8l2.5 1.5"/>
+						</svg>
+						<time>{relativeTime(c.time)}</time>
+					</span>
+					{#if c.story_root}
+						<a class="meta thread-link" href="/item/{c.story_root}">view thread</a>
+					{/if}
+					<span class="meta meta-share">
+						<ShareMenu itemKey={c.key} title={(c.text ?? '').slice(0, 80)} />
+					</span>
+				</div>
+			</li>
+		{/each}
+	</ol>
 {:else}
 	<ol class="story-list">
-		{#each data.stories as s (s.key)}
+		{#each data.items as s (s.key)}
 			{@const domain = domainOf(s.url)}
 			<li class="story">
 				<div class="title">
@@ -451,6 +491,19 @@
 		letter-spacing: 0.05em;
 	}
 	.meta-share { margin-left: auto; }
+
+	/* Comment row variant — no title row; snippet IS the headline. */
+	.comment-body {
+		font-size: 0.95rem;
+		line-height: 1.5;
+		color: var(--c-text);
+		max-width: 80ch;
+	}
+	.thread-link {
+		color: var(--c-accent);
+		text-decoration: none;
+	}
+	.thread-link:hover { text-decoration: underline; }
 
 	.pagination {
 		display: flex;
