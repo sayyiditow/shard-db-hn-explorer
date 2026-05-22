@@ -12,6 +12,10 @@ export interface Story {
 	score: number;
 	url: string;
 	title: string;
+	/** Self-post body — Ask HN / Show HN / polls / jobs without a URL.
+	 *  Raw HN-format with <p>, <i>, <a>, <pre><code>. Empty for
+	 *  link-stories. Up to 32 KB. */
+	text: string;
 	descendants: number;
 	type: string;       // "story" | "job" | "poll" | "pollopt"
 	deleted: boolean;

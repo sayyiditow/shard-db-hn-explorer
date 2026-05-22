@@ -64,7 +64,7 @@
 				type="search"
 				name="q"
 				bind:value={q}
-				placeholder="Search stories, comments, users…"
+				placeholder="Search stories, jobs, polls, comments, users…"
 				autocomplete="off"
 				aria-label="Search Hacker News"
 				aria-invalid={qTooShort}

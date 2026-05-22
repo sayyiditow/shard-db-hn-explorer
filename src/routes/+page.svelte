@@ -1,6 +1,6 @@
 <script lang="ts">
 	import TimingBadge from '$lib/components/TimingBadge.svelte';
-	import { relativeTime, absoluteTime, domainOf, pluralise } from '$lib/hn/format';
+	import { relativeTime, absoluteTime, domainOf, pluralise, commentSnippet } from '$lib/hn/format';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
@@ -185,6 +185,12 @@
 					{/if}
 					{#if domain}<span class="domain">({domain})</span>{/if}
 				</div>
+				{#if s.text && s.text.length > 0}
+					<!-- Self-post body preview (Ask HN, Show HN with text,
+					     polls, jobs without URL). HN HTML stripped to plain
+					     text, truncated to ~220 chars. -->
+					<p class="preview">{commentSnippet(s.text, 220)}</p>
+				{/if}
 				<div class="byline">
 					<span class="meta meta-score" title="Points">
 						<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
@@ -339,6 +345,13 @@
 		font-size: 0.85rem;
 		margin-left: 0.5rem;
 		font-family: var(--f-mono);
+	}
+	.preview {
+		margin: var(--s-2) 0 0 0;
+		color: var(--c-text-muted);
+		font-size: 0.9rem;
+		line-height: 1.5;
+		max-width: 80ch;
 	}
 	.byline {
 		display: flex;
