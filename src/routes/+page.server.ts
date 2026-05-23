@@ -61,6 +61,15 @@ export const load: PageServerLoad = async ({ url }) => {
 	const winRaw    = (url.searchParams.get('window')    ?? 'all').trim();
 	const by        = (url.searchParams.get('by')        ?? '').trim();
 	const after     = (url.searchParams.get('after')     ?? '').trim();
+	const scoreMinRaw = url.searchParams.get('score_min');
+	const scoreMaxRaw = url.searchParams.get('score_max');
+	const sinceRaw    = url.searchParams.get('since');
+	const untilRaw    = url.searchParams.get('until');
+
+	const scoreMin  = scoreMinRaw ? parseInt(scoreMinRaw, 10) : null;
+	const scoreMax  = scoreMaxRaw ? parseInt(scoreMaxRaw, 10) : null;
+	const sinceMs   = sinceRaw ? new Date(sinceRaw).getTime() : null;
+	const untilMs   = untilRaw ? new Date(untilRaw).getTime() : null;
 
 	const category: Category = CATEGORIES.has(catRaw as Category) ? (catRaw as Category) : '';
 
@@ -141,6 +150,23 @@ export const load: PageServerLoad = async ({ url }) => {
 		criteria.push({ field: 'time', op: 'gte', value: since });
 	}
 
+	// Advanced numeric/date filters. Score only applies to stories
+	// (comments object lacks the score field). Custom date ranges
+	// combine with (or replace) the window pill — both are gte/lte
+	// on the same time field so the more restrictive always wins.
+	if (sourceObject !== 'comments' && scoreMin != null && !isNaN(scoreMin)) {
+		criteria.push({ field: 'score', op: 'gte', value: scoreMin });
+	}
+	if (sourceObject !== 'comments' && scoreMax != null && !isNaN(scoreMax)) {
+		criteria.push({ field: 'score', op: 'lte', value: scoreMax });
+	}
+	if (sinceMs != null && !isNaN(sinceMs)) {
+		criteria.push({ field: 'time', op: 'gte', value: sinceMs });
+	}
+	if (untilMs != null && !isNaN(untilMs)) {
+		criteria.push({ field: 'time', op: 'lte', value: untilMs });
+	}
+
 	// Cursor: forward-only. The shard-db cursor carries (order_by_value,
 	// primary_key) tying back to the order_by btree position. URL-encoded
 	// here so it survives links. Parse failures fall back to page 1.
@@ -201,6 +227,7 @@ export const load: PageServerLoad = async ({ url }) => {
 		const err = isError(pageResp) ? pageResp.error : (countResp as { error: string }).error;
 		return {
 			q, category, sort, window: win, by, page,
+			scoreMin, scoreMax, since: sinceRaw ?? null, until: untilRaw ?? null,
 			source: sourceObject,
 			items: [] as Array<Story | Comment>,
 			totalCount: 0, queryMs,
@@ -231,11 +258,12 @@ export const load: PageServerLoad = async ({ url }) => {
 
 	return {
 		q, category, sort, window: win, by, page,
+		scoreMin, scoreMax, since: sinceRaw ?? null, until: untilRaw ?? null,
 		source: sourceObject,
 		items, totalCount, queryMs,
 		pageSize: PAGE_SIZE,
 		nextCursor,
 		dbStats,
-		query: findQuery  // so /stats-style "show query" works if we want
+		query: findQuery
 	};
 };
