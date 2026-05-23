@@ -5,8 +5,9 @@ import type { Story, Comment } from '$lib/hn/types';
 import type { PageServerLoad } from './$types';
 
 const COMMENTS_PAGE_SIZE = 500;
+const NEAR_CONTEXT = 50;
 
-export const load: PageServerLoad = async ({ params }) => {
+export const load: PageServerLoad = async ({ params, url }) => {
 	const idStr = params.id;
 	const idNum = Number(idStr);
 	if (!Number.isFinite(idNum) || !/^\d+$/.test(idStr)) {
@@ -28,27 +29,78 @@ export const load: PageServerLoad = async ({ params }) => {
 	const story: Story = { key: idStr, ...(storyResp as Omit<Story, 'key'>) };
 
 	const tComments = performance.now();
-	const commentsResp = await shardDb.query({
-		mode: 'find',
-		dir: 'hn',
-		object: 'comments',
-		criteria: [{ field: 'story_root', op: 'eq', value: idNum }],
-		order_by: 'time',
-		order: 'asc',
-		limit: COMMENTS_PAGE_SIZE
-	});
-	const commentsMs = performance.now() - tComments;
+	const nearKey = url.searchParams.get('near');
 
-	// Default array preserves time-asc sort; format:dict would reshuffle
-	// by JS integer-key sort and break the thread chronology.
 	let comments: Comment[] = [];
 	let commentsError: string | undefined;
-	if (isError(commentsResp)) {
-		commentsError = commentsResp.error;
-	} else {
-		const arr = commentsResp as Array<{ key: string; value: Omit<Comment, 'key'> }>;
-		comments = arr.map((r) => ({ key: r.key, ...r.value }));
+	let nearFailed = false;
+
+	if (nearKey) {
+		const targetResp = await shardDb.query({
+			mode: 'get', dir: 'hn', object: 'comments', key: nearKey
+		});
+
+		if (!isError(targetResp)) {
+			const target: Comment = { key: nearKey, ...(targetResp as Omit<Comment, 'key'>) };
+
+			const mapFlat = (resp: unknown, excludeKey?: string): Comment[] => {
+				if (isError(resp)) return [];
+				return (resp as Array<{ key: string; value: Omit<Comment, 'key'> }>)
+					.map((r) => ({ key: r.key, ...r.value } as Comment))
+					.filter((c) => c.key !== excludeKey);
+			};
+
+			const [beforeResp, afterResp] = await Promise.all([
+				shardDb.query({
+					mode: 'find', dir: 'hn', object: 'comments',
+					criteria: [
+						{ field: 'story_root', op: 'eq', value: idNum },
+						{ field: 'time', op: 'lte', value: target.time }
+					],
+					order_by: 'time', order: 'desc', limit: NEAR_CONTEXT
+				}),
+				shardDb.query({
+					mode: 'find', dir: 'hn', object: 'comments',
+					criteria: [
+						{ field: 'story_root', op: 'eq', value: idNum },
+						{ field: 'time', op: 'gte', value: target.time }
+					],
+					order_by: 'time', order: 'asc', limit: NEAR_CONTEXT + 1
+				})
+			]);
+
+			const before = mapFlat(beforeResp, nearKey).reverse();
+			const after = mapFlat(afterResp, nearKey);
+			const raw = [...before, target, ...after];
+			const seen = new Set<string>();
+			comments = raw.filter((c) => (seen.has(c.key) ? false : seen.add(c.key)));
+		}
+
+		if (comments.length === 0) {
+			nearFailed = true;
+		}
 	}
+
+	if (!nearKey || nearFailed) {
+		const commentsResp = await shardDb.query({
+			mode: 'find',
+			dir: 'hn',
+			object: 'comments',
+			criteria: [{ field: 'story_root', op: 'eq', value: idNum }],
+			order_by: 'time',
+			order: 'asc',
+			limit: COMMENTS_PAGE_SIZE
+		});
+
+		if (isError(commentsResp)) {
+			commentsError = commentsResp.error;
+		} else {
+			const arr = commentsResp as Array<{ key: string; value: Omit<Comment, 'key'> }>;
+			comments = arr.map((r) => ({ key: r.key, ...r.value }));
+		}
+	}
+
+	const commentsMs = performance.now() - tComments;
 
 	const tree = buildCommentTree(comments, idNum);
 	const totalNodes = countNodes(tree);
@@ -61,6 +113,6 @@ export const load: PageServerLoad = async ({ params }) => {
 		storyMs,
 		commentsMs,
 		totalMs: storyMs + commentsMs,
-		hasMore: comments.length === COMMENTS_PAGE_SIZE && totalNodes < (story.descendants ?? 0)
+		hasMore: nearKey ? false : (comments.length === COMMENTS_PAGE_SIZE && totalNodes < (story.descendants ?? 0))
 	};
 };

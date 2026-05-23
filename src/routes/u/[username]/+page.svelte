@@ -146,7 +146,7 @@
 					{#each data.comments as c (c.key)}
 						<li>
 							<p class="snippet">
-								<a href="/item/{c.story_root}#c{c.key}">{commentSnippet(c.text)}</a>
+								<a href="/item/{c.story_root}?near={c.key}#c{c.key}">{commentSnippet(c.text)}</a>
 							</p>
 							<div class="byline">
 								<time title={absoluteTime(c.time)}>{relativeTime(c.time)}</time>
