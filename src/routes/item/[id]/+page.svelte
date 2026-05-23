@@ -8,7 +8,7 @@
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
-	let storyHasText = $derived(false);
+	let storyHasText = $derived(!!data.story.text);
 	let domain = $derived(domainOf(data.story.url));
 
 	afterNavigate(() => {
@@ -51,6 +51,9 @@
 			<a href={hnItemUrl(data.story.key)} target="_blank" rel="noopener">↗ HN</a>
 		</div>
 	</header>
+	{#if storyHasText}
+		<div class="story-text">{@html sanitiseHnHtml(data.story.text)}</div>
+	{/if}
 </article>
 
 <section class="comments">
@@ -108,6 +111,28 @@
 	}
 	.story .meta a { color: inherit; }
 	.story .meta a:hover { color: var(--c-link); }
+	.story-text {
+		margin-top: var(--s-4);
+		padding: var(--s-3) var(--s-4);
+		background: var(--c-surface);
+		border-left: 3px solid var(--c-accent);
+		border-radius: var(--r-sm);
+		font-size: 0.95rem;
+		line-height: 1.6;
+		color: var(--c-text);
+	}
+	.story-text :global(p) { margin: 0 0 var(--s-2) 0; }
+	.story-text :global(p:last-child) { margin-bottom: 0; }
+	.story-text :global(pre) {
+		background: var(--c-surface-2);
+		padding: var(--s-2) var(--s-3);
+		border-radius: var(--r-sm);
+		overflow-x: auto;
+		font-size: 0.85rem;
+	}
+	.story-text :global(code) { font-family: var(--f-mono); }
+	.story-text :global(i) { color: var(--c-text-muted); }
+	.story-text :global(a) { color: var(--c-link); }
 
 	.comments {
 		margin-top: var(--s-6);
