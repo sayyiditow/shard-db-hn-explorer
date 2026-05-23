@@ -4,12 +4,55 @@
 	import { relativeTime, absoluteTime, domainOf, pluralise, commentSnippet } from '$lib/hn/format';
 	import type { Story, Comment } from '$lib/hn/types';
 	import type { PageData } from './$types';
+	import { page } from '$app/state';
+	import { goto } from '$app/navigation';
 
 	let { data }: { data: PageData } = $props();
 
 	let comments = $derived(data.source === 'comments' ? (data.items as Comment[]) : []);
 	let stories  = $derived(data.source !== 'comments' ? (data.items as Story[]) : []);
 
+	// ── Advanced drawer state ──────────────────────────────────────
+	let advancedOpen  = $state(false);
+	let qInput        = $state('');
+	let byInput       = $state('');
+	let scoreMinInput = $state('');
+	let scoreMaxInput = $state('');
+	let sinceInput    = $state('');
+	let untilInput    = $state('');
+
+	$effect(() => {
+		qInput        = data.q;
+		byInput       = data.by;
+		scoreMinInput = data.scoreMin != null ? String(data.scoreMin) : '';
+		scoreMaxInput = data.scoreMax != null ? String(data.scoreMax) : '';
+		sinceInput    = data.since ?? '';
+		untilInput    = data.until ?? '';
+		advancedOpen  = !!(data.scoreMin != null || data.scoreMax != null || data.since || data.until);
+	});
+
+	function applyAdvancedFilters() {
+		const p = new URLSearchParams();
+		if (data.category) p.set('category', data.category);
+		if (data.sort && data.sort !== 'popularity') p.set('sort', data.sort);
+		if (data.window && data.window !== 'all') p.set('window', data.window);
+		if (qInput.trim())    p.set('q', qInput.trim());
+		if (byInput.trim())   p.set('by', byInput.trim());
+		if (scoreMinInput)    p.set('score_min', scoreMinInput);
+		if (scoreMaxInput)    p.set('score_max', scoreMaxInput);
+		if (sinceInput)       p.set('since', sinceInput);
+		if (untilInput)       p.set('until', untilInput);
+		goto(`/?${p.toString()}`);
+	}
+
+	function resetFilters() {
+		qInput = byInput = '';
+		scoreMinInput = scoreMaxInput = '';
+		sinceInput = untilInput = '';
+		goto('/');
+	}
+
+	// ── Filter pills ──────────────────────────────────────────────
 	// Category pills — combines type filter with derived HN categories
 	// (Ask HN / Show HN are type=story + title starts_with). Order
 	// matches Algolia's: All → Stories → Show HN → Ask HN → Polls →
@@ -36,25 +79,35 @@
 		{ value: '24h', label: 'Past 24h' }
 	];
 
+	/** Set a param only when it differs from its default value. */
+	function setParam(p: URLSearchParams, key: string, val: unknown) {
+		if (key === 'sort' && val === 'popularity') return;
+		if (key === 'window' && val === 'all') return;
+		if (val != null && val !== '' && val !== false) p.set(key, String(val));
+	}
+
+	/** Collect all current filter params with optional overrides. */
+	function collectParams(overrides: Record<string, unknown> = {}): URLSearchParams {
+		const p = new URLSearchParams();
+		const o = (key: string, fallback: unknown) => key in overrides ? overrides[key] : fallback;
+		setParam(p, 'q',         o('q',         data.q));
+		setParam(p, 'category',  o('category',  data.category));
+		setParam(p, 'sort',      o('sort',      data.sort));
+		setParam(p, 'window',    o('window',    data.window));
+		setParam(p, 'by',        o('by',        data.by));
+		setParam(p, 'score_min', o('scoreMin',  data.scoreMin));
+		setParam(p, 'score_max', o('scoreMax',  data.scoreMax));
+		setParam(p, 'since',     o('since',     data.since));
+		setParam(p, 'until',     o('until',     data.until));
+		return p;
+	}
+
 	// Build a "?a=X&b=Y" string from current state + a patch. Drops
 	// defaults so the URL stays short for the common cases. Switching
 	// any filter resets pagination (we'd lose the cursor anyway).
 	function pillHref(patch: Record<string, string>): string {
-		const params = new URLSearchParams();
-		const next = {
-			q: data.q,
-			category: data.category,
-			sort: data.sort,
-			window: data.window,
-			by: data.by,
-			...patch
-		};
-		if (next.q) params.set('q', next.q);
-		if (next.category) params.set('category', next.category);
-		if (next.sort && next.sort !== 'popularity') params.set('sort', next.sort);
-		if (next.window && next.window !== 'all') params.set('window', next.window);
-		if (next.by) params.set('by', next.by);
-		const s = params.toString();
+		const p = collectParams(patch);
+		const s = p.toString();
 		return s ? `/?${s}` : '/';
 	}
 
@@ -64,15 +117,10 @@
 	// All current filter params carry over.
 	let nextHref = $derived.by(() => {
 		if (!data.nextCursor) return null;
-		const params = new URLSearchParams();
-		if (data.q) params.set('q', data.q);
-		if (data.category) params.set('category', data.category);
-		if (data.sort && data.sort !== 'popularity') params.set('sort', data.sort);
-		if (data.window && data.window !== 'all') params.set('window', data.window);
-		if (data.by) params.set('by', data.by);
-		params.set('after', data.nextCursor);
-		params.set('page', String((data.page ?? 1) + 1));
-		return `/?${params.toString()}`;
+		const p = collectParams();
+		p.set('after', data.nextCursor);
+		p.set('page', String((data.page ?? 1) + 1));
+		return `/?${p.toString()}`;
 	});
 
 	// Range labels for the pagination footer: "Showing 51-75 of 210,520"
@@ -148,6 +196,11 @@
 					   class:active={data.window === w.value}
 					>{w.label}</a>
 				{/each}
+				<span class="filter-divider adv-divider" aria-hidden="true"></span>
+				<button class="advanced-toggle" onclick={() => advancedOpen = !advancedOpen}>
+					<span class="adv-arrow">{advancedOpen ? '▲' : '▼'}</span>
+					Advanced
+				</button>
 			</div>
 			{#if data.by}
 				<div class="filter-row author-filter">
@@ -156,6 +209,41 @@
 						<a href="/u/{data.by}">{data.by}</a>
 						<a href={pillHref({ by: '' })} class="clear" title="Clear author filter">×</a>
 					</span>
+				</div>
+			{/if}
+
+			{#if advancedOpen}
+				<div class="advanced-drawer" role="region" aria-label="Advanced filters">
+					<div class="drawer-fields">
+						<label class="drawer-field">
+							<span class="drawer-label">Search</span>
+							<input type="text" bind:value={qInput} placeholder="e.g. 'serverless'" />
+						</label>
+						<label class="drawer-field">
+							<span class="drawer-label">Author</span>
+							<input type="text" bind:value={byInput} placeholder="e.g. 'tosh'" />
+						</label>
+						<label class="drawer-field">
+							<span class="drawer-label">Min score</span>
+							<input type="number" bind:value={scoreMinInput} min="0" placeholder="e.g. 100" />
+						</label>
+						<label class="drawer-field">
+							<span class="drawer-label">Max score</span>
+							<input type="number" bind:value={scoreMaxInput} min="0" placeholder="e.g. 500" />
+						</label>
+						<label class="drawer-field">
+							<span class="drawer-label">From</span>
+							<input type="date" bind:value={sinceInput} />
+						</label>
+						<label class="drawer-field">
+							<span class="drawer-label">To</span>
+							<input type="date" bind:value={untilInput} />
+						</label>
+					</div>
+					<div class="drawer-actions">
+						<button class="apply" onclick={applyAdvancedFilters}>Apply Filters</button>
+						<button class="reset" onclick={resetFilters}>Reset All</button>
+					</div>
 				</div>
 			{/if}
 		</div>
@@ -571,9 +659,99 @@
 		font-size: 0.78rem;
 		margin-top: 0.15rem;
 	}
+	/* ── Advanced toggle ──────────────────────────────────────────── */
+	.advanced-toggle {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.25rem;
+		margin-left: auto;
+		font-size: 0.85rem;
+		font-family: inherit;
+		color: var(--c-text-muted);
+		background: none;
+		border: 1px solid transparent;
+		border-radius: var(--r-sm);
+		padding: 0.2rem 0.6rem;
+		cursor: pointer;
+	}
+	.advanced-toggle:hover {
+		color: var(--c-text);
+		border-color: var(--c-border);
+	}
+	.adv-arrow { font-size: 0.7rem; }
+	.adv-divider { margin-left: auto !important; }
+
+	/* ── Advanced drawer ─────────────────────────────────────────── */
+	.advanced-drawer {
+		margin-top: var(--s-1);
+		padding: var(--s-3);
+		border: 1px solid var(--c-border);
+		border-radius: var(--r-md);
+		background: var(--c-bg);
+	}
+	.drawer-fields {
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		gap: var(--s-3);
+	}
+	.drawer-field {
+		display: flex;
+		flex-direction: column;
+		gap: 0.25rem;
+	}
+	.drawer-label {
+		color: var(--c-text-muted);
+		font-size: 0.78rem;
+		font-family: var(--f-mono);
+	}
+	.drawer-field input {
+		padding: 0.35rem 0.5rem;
+		border: 1px solid var(--c-border);
+		border-radius: var(--r-sm);
+		background: var(--c-surface);
+		color: var(--c-text);
+		font-size: 0.9rem;
+		font-family: inherit;
+	}
+	.drawer-field input::placeholder { color: var(--c-text-muted); opacity: 0.5; }
+	.drawer-field input:focus {
+		outline: none;
+		border-color: var(--c-accent);
+		box-shadow: 0 0 0 1px var(--c-accent);
+	}
+
+	.drawer-actions {
+		display: flex;
+		gap: var(--s-2);
+		margin-top: var(--s-3);
+	}
+	.drawer-actions button {
+		padding: 0.4rem 1rem;
+		border-radius: var(--r-sm);
+		font-size: 0.85rem;
+		font-family: inherit;
+		cursor: pointer;
+		border: 1px solid var(--c-border);
+	}
+	.drawer-actions .apply {
+		background: var(--c-accent);
+		color: #fff;
+		border-color: var(--c-accent);
+		font-weight: 600;
+	}
+	.drawer-actions .apply:hover { opacity: 0.9; }
+	.drawer-actions .reset {
+		background: var(--c-surface);
+		color: var(--c-text);
+	}
+	.drawer-actions .reset:hover { border-color: var(--c-accent); }
+
 	@media (max-width: 640px) {
 		.page-link { min-width: 3.5rem; padding: 0.4rem 0.5rem; }
 		.page-num .of { display: none; }
 		.header-controls { flex-direction: column; }
+		.drawer-fields { grid-template-columns: 1fr; }
+		.advanced-toggle { margin-left: 0; }
+		.adv-divider { display: none; }
 	}
 </style>
