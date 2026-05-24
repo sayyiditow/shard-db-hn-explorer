@@ -213,3 +213,30 @@ export async function tick(deps: TickDeps = {}): Promise<TickResult> {
 		maxItem
 	};
 }
+
+const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+let g_started = false;
+let g_interval: ReturnType<typeof setInterval> | null = null;
+
+/** Begin the refresh loop.  Idempotent — calling repeatedly is safe;
+ *  only the first call schedules anything.  Run an immediate tick so
+ *  cold-start cache priming doesn't wait the full interval. */
+export function start(): void {
+	if (g_started) return;
+	g_started = true;
+
+	void tick().catch((e) => console.error('[refresh] initial tick:', e));
+	g_interval = setInterval(
+		() => { void tick().catch((e) => console.error('[refresh] tick:', e)); },
+		REFRESH_INTERVAL_MS
+	);
+}
+
+/** Test-only — stops the interval so the process exits cleanly. */
+export function stopForTesting(): void {
+	if (g_interval) {
+		clearInterval(g_interval);
+		g_interval = null;
+	}
+	g_started = false;
+}
