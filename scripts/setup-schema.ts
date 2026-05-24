@@ -51,9 +51,9 @@ async function main() {
 			'by:varchar:32',
 			'time:timestamp',                                   // HN epoch seconds * 1000 = ms
 			'score:int',
-			'url:varchar:2048',                                 // bumped from 512 — HN URLs with tracking params
-			'title:varchar:512',
-			'text:varchar:32768',                               // self-post body (Ask HN, polls). Empty for link-only stories.
+			'url:varchar:512',                                  // ~99% of HN URLs fit incl. tracking params; longer get truncated with "..."
+			'title:varchar:128',                                // HN enforces ~80-char titles; 128 is safe upper bound
+			'text:varchar:4096',                                // self-post body (Ask HN, polls). 4 KB covers ~99%; longer get truncated with "..."
 			'descendants:int',
 			'type:enum(story,job,poll,comment,pollopt)',        // 1-byte stored, auto-bitmap (was varchar:8)
 			'deleted:bool',                                     // auto-bitmap
@@ -87,7 +87,7 @@ async function main() {
 			'time:timestamp',                                   // ms; converted from HN seconds at insert
 			'parent:int',
 			'story_root:int',
-			'text:varchar:32768',                               // bumped from 8192 — long-form HN comments do exist
+			'text:varchar:4096',                                // 4 KB covers ~95% of HN comments; longer get truncated with "..."
 			'deleted:bool',                                     // auto-bitmap
 			'dead:bool'                                         // auto-bitmap
 		],
@@ -116,7 +116,7 @@ async function main() {
 		fields: [
 			'karma:int',
 			'created:timestamp',        // ms; converted from HN seconds at insert
-			'about:varchar:4096',
+			'about:varchar:1024',                               // most HN bios are short; longer get truncated with "..."
 			'submitted_count:int'
 		],
 		indexes: ['karma', 'created']
