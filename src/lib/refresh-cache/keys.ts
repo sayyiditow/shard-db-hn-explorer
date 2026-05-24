@@ -6,8 +6,11 @@
  *
  *  Coverage:
  *    3 top-level counts (stories, comments, users)
- *    + 7 categories × 3 sorts × 4 windows × 2 query shapes (find/count) = 168
- *    = 171 slots total.
+ *    + every (category, sort, window) first-page query, deduped by
+ *      canonical key.  Comment-source queries collapse aggressively
+ *      because all three sorts map to order_by=time.  Actual yield
+ *      is somewhere around 120 entries depending on time-window
+ *      semantics.
  *
  *  Categories / sorts / windows mirror +page.server.ts; if those
  *  expand, this list must too. */
@@ -96,23 +99,34 @@ function buildCriteria(
         criteria.push({ field: 'time', op: 'gte', value: referenceNowMs - HOT_WINDOW_MS });
     }
 
-    const order_by = SORT_FIELDS[sort];
+    let order_by = SORT_FIELDS[sort];
+    if (source === 'comments' && (sort === 'popularity' || sort === 'hot')) {
+        order_by = 'time';
+    }
 
     return { source, criteria, order_by };
 }
 
-/** Yields all cache entries (3 top-level + 168 first-page). The route
- *  layer hashes its own request with canonicalKey() and looks up by
- *  the same string; we don't expose the (category, sort, window)
- *  tuple — the key is the canonical query JSON. */
+/** Yields all cache entries (3 top-level + first-page queries, deduped).
+ *  The route layer hashes its own request with canonicalKey() and looks
+ *  up by the same string; we don't expose the (category, sort, window)
+ *  tuple — the key is the canonical query JSON. Duplicate keys collapse
+ *  naturally when comments queries rewrite sort to 'time'. */
 export function* enumerateKeys(referenceNowMs: number = Date.now()): Generator<CacheEntry> {
+    const seen = new Set<string>();
+
     // 3 top-level counts
     for (const object of ['stories', 'comments', 'users']) {
         const q = { mode: 'count', dir: HN_DIR, object };
-        yield { key: canonicalKey(q), query: q };
+        const key = canonicalKey(q);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        yield { key, query: q };
     }
 
-    // 168 first-page queries (84 combos × {find, count})
+    // First-page queries (duplicates collapse naturally — comment-source
+    // queries rewrite popularity/hot → time so all three sorts map to
+    // the same payload at most windows; we dedupe by canonical key).
     for (const category of CATEGORIES) {
         for (const sort of SORTS) {
             for (const win of WINDOWS) {
@@ -126,21 +140,25 @@ export function* enumerateKeys(referenceNowMs: number = Date.now()): Generator<C
                     order_by,
                     order: 'desc',
                     limit: PAGE_SIZE,
-                    cursor: null,
-                    _sort: sort,  // Metadata for cache differentiation
-                    _window: win
+                    cursor: null
                 };
-                yield { key: canonicalKey(findQ), query: findQ };
+                const findKey = canonicalKey(findQ);
+                if (!seen.has(findKey)) {
+                    seen.add(findKey);
+                    yield { key: findKey, query: findQ };
+                }
 
                 const countQ = {
                     mode: 'count',
                     dir: HN_DIR,
                     object: source,
-                    criteria,
-                    _sort: sort,  // Metadata for cache differentiation
-                    _window: win
+                    criteria
                 };
-                yield { key: canonicalKey(countQ), query: countQ };
+                const countKey = canonicalKey(countQ);
+                if (!seen.has(countKey)) {
+                    seen.add(countKey);
+                    yield { key: countKey, query: countQ };
+                }
             }
         }
     }
