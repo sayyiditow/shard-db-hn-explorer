@@ -6,9 +6,9 @@
 	"scripts": {
 		"app": "./scripts/dev.sh",
 		"bulk-load": "bun run scripts/bulk-load.ts",
-		"dev": "vite dev",
-		"build": "vite build",
-		"preview": "vite preview",
+		"dev": "bun --bun vite dev",
+		"build": "bun --bun vite build",
+		"preview": "bun --bun vite preview",
 		"prepare": "svelte-kit sync || echo ''",
 		"test": "bun test",
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",

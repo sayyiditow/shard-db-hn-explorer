@@ -66,28 +66,35 @@ interface ShardRecord { key: string; value: Record<string, unknown>; }
  *  don't need Promise.all here.  Per-slot errors are logged-and-
  *  dropped so a single broken query doesn't poison the whole cache. */
 async function rewarmCache(client: NonNullable<TickDeps['client']>): Promise<void> {
+	const t0 = Date.now();
 	const newMap = new Map<string, cache.Entry>();
+	let failed = 0;
 	for (const entry of enumerateKeys()) {
 		const r = await client.query(entry.query);
 		if (isError(r)) {
 			console.warn(`[refresh] rewarm: query failed for ${entry.key}: ${(r as { error: string }).error}`);
+			failed++;
 			continue;
 		}
 		newMap.set(entry.key, { result: r, mtime: Date.now() });
 	}
 	cache.swap(newMap);
+	console.log(`[refresh] rewarmed cache: ${newMap.size} slots (${failed} failed) in ${Date.now() - t0}ms`);
 }
 
 export async function tick(deps: TickDeps = {}): Promise<TickResult> {
 	const client = deps.client ?? defaultClient;
 	const api = deps.api ?? defaultHn;
 
+	const t0 = Date.now();
 	const lastSeen = await state.read();
+	console.log(`[refresh] tick start: last_seen_id=${lastSeen}`);
 
 	let maxItem: number;
 	try {
 		maxItem = await api.getMaxItem();
 	} catch (e) {
+		console.error(`[refresh] tick aborted: getMaxItem failed: ${(e as Error).message}`);
 		return emptyResult(lastSeen, `getMaxItem failed: ${(e as Error).message}`);
 	}
 
@@ -103,6 +110,9 @@ export async function tick(deps: TickDeps = {}): Promise<TickResult> {
 	if (lastSeen === 0) {
 		effectiveLastSeen = maxItem;
 		await state.write(maxItem);
+		console.log(`[refresh] first run: seeded last_seen_id=${maxItem} (no backfill)`);
+	} else {
+		console.log(`[refresh] HN maxitem=${maxItem} (delta=${maxItem - lastSeen})`);
 	}
 
 	let storiesInserted = 0, commentsInserted = 0, usersInserted = 0;
@@ -111,7 +121,10 @@ export async function tick(deps: TickDeps = {}): Promise<TickResult> {
 		const ids: number[] = [];
 		for (let i = effectiveLastSeen + 1; i <= maxItem; i++) ids.push(i);
 
+		console.log(`[refresh] fetching ${ids.length} items from HN (concurrency=16)...`);
+		const tFetch = Date.now();
 		const items = await api.getItemsConcurrent(ids, 16);
+		console.log(`[refresh] fetched ${items.length} items in ${Date.now() - tFetch}ms (${ids.length - items.length} dropped/deleted)`);
 
 		const stories: ShardRecord[] = [];
 		const comments: ShardRecord[] = [];
@@ -167,7 +180,10 @@ export async function tick(deps: TickDeps = {}): Promise<TickResult> {
 			value: { karma: 0, created: 0, about: '', submitted_count: 0 }
 		}));
 
+		console.log(`[refresh] partitioned: ${stories.length} stories, ${comments.length} comments, ${uniqueUsers.size} unique users`);
+
 		try {
+			const tUpsert = Date.now();
 			const tasks: Promise<unknown>[] = [];
 			if (stories.length) {
 				tasks.push((async () => {
@@ -197,7 +213,9 @@ export async function tick(deps: TickDeps = {}): Promise<TickResult> {
 				})());
 			}
 			await Promise.all(tasks);
+			console.log(`[refresh] upserted: stories=${storiesInserted} comments=${commentsInserted} users=${usersInserted} in ${Date.now() - tUpsert}ms`);
 		} catch (e) {
+			console.error(`[refresh] upsert failed: ${(e as Error).message}`);
 			return emptyResult(lastSeen, (e as Error).message);
 		}
 
@@ -208,6 +226,7 @@ export async function tick(deps: TickDeps = {}): Promise<TickResult> {
 	if (total > 0 || cache.stats().size === 0) {
 		await rewarmCache(client);
 	}
+	console.log(`[refresh] tick done in ${Date.now() - t0}ms (upserted=${total})`);
 	return {
 		upserted: { stories: storiesInserted, comments: commentsInserted, users: usersInserted, total },
 		maxItem
