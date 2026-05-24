@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
-import { unlinkSync, existsSync } from 'node:fs';
+import { unlinkSync, existsSync, writeFileSync } from 'node:fs';
 import { read, write, STATE_PATH } from './state';
 
 describe('refresh state', () => {
@@ -20,7 +20,7 @@ describe('refresh state', () => {
     });
 
     test('read() returns 0 on corrupted file', async () => {
-        await Bun.write(STATE_PATH, 'not json at all');
+        writeFileSync(STATE_PATH, 'not json at all', 'utf8');
         expect(await read()).toBe(0);
     });
 });
