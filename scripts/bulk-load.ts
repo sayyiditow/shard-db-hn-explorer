@@ -24,6 +24,7 @@ import {
 	byteLengthFromUrl
 } from 'hyparquet';
 import { ShardDbClient, isError } from '../src/lib/shard-db/client';
+import { write as writeRefreshState, STATE_PATH as REFRESH_STATE_PATH } from '../src/lib/refresh-cache/state';
 
 const HF_BASE = 'https://huggingface.co/datasets/anantn/hacker-news/resolve/main';
 const ITEMS_URL = `${HF_BASE}/items.parquet`;
@@ -187,7 +188,7 @@ async function loadUsers(pool: ShardDbClient[]): Promise<number> {
 	return records.length;
 }
 
-async function loadItems(pool: ShardDbClient[]): Promise<{ stories: number; comments: number }> {
+async function loadItems(pool: ShardDbClient[]): Promise<{ stories: number; comments: number; maxId: number }> {
 	console.log('\nItems — fetching items.parquet metadata...');
 	const byteLength = await byteLengthFromUrl(ITEMS_URL);
 	console.log(`  items.parquet: ${(byteLength / 1e9).toFixed(2)} GB`);
@@ -207,6 +208,12 @@ async function loadItems(pool: ShardDbClient[]): Promise<{ stories: number; comm
 	const itemMeta = new Map<number, ItemMeta>();
 	const stories: { key: string; value: Record<string, unknown> }[] = [];
 	const comments: { key: string; value: Record<string, unknown> }[] = [];
+	// Track the highest HN item ID we ingest. After bulk-insert we write
+	// this to .hn-refresh-state.json so the 5-min refresh loop knows to
+	// start backfilling from maxId+1 onward (otherwise it would seed at
+	// "current HN maxitem" on first run and the parquet→now gap would
+	// be permanently lost).
+	let maxId = 0;
 
 	let cursor = 0;
 	const t0 = performance.now();
@@ -230,6 +237,7 @@ async function loadItems(pool: ShardDbClient[]): Promise<{ stories: number; comm
 		// Then split + shape
 		for (const r of rows) {
 			const id = n(r.id);
+			if (id > maxId) maxId = id;
 			const idStr = String(id);
 			if (r.type === 'story' || r.type === 'job' || r.type === 'poll' || r.type === 'pollopt') {
 				stories.push({
@@ -305,7 +313,7 @@ async function loadItems(pool: ShardDbClient[]): Promise<{ stories: number; comm
 	await bulkInsertParallel(pool, 'comments', comments);
 	console.log(`    ${((performance.now() - tComments) / 1000).toFixed(1)}s`);
 
-	return { stories: stories.length, comments: comments.length };
+	return { stories: stories.length, comments: comments.length, maxId };
 }
 
 function findStoryRoot(commentId: number, items: Map<number, ItemMeta>): number {
@@ -345,14 +353,24 @@ async function main() {
 
 	const totalStart = performance.now();
 	const userCount = await loadUsers(pool);
-	const { stories, comments } = await loadItems(pool);
+	const { stories, comments, maxId } = await loadItems(pool);
 	const totalMs = performance.now() - totalStart;
 
+	// Seed the refresh state file so the 5-min loop picks up where the
+	// parquet leaves off.  Without this, the first refresh tick on a
+	// fresh deployment would seed last_seen_id at "current HN maxitem"
+	// and skip every item between the snapshot date and "now."
+	if (maxId > 0) {
+		await writeRefreshState(maxId);
+		console.log(`  Wrote ${REFRESH_STATE_PATH} with last_seen_id=${maxId}`);
+	}
+
 	console.log('\nDone.');
-	console.log(`  Stories:  ${fmtCount(stories)}`);
-	console.log(`  Comments: ${fmtCount(comments)}`);
-	console.log(`  Users:    ${fmtCount(userCount)}`);
-	console.log(`  Total:    ${(totalMs / 1000).toFixed(1)}s`);
+	console.log(`  Stories:   ${fmtCount(stories)}`);
+	console.log(`  Comments:  ${fmtCount(comments)}`);
+	console.log(`  Users:     ${fmtCount(userCount)}`);
+	console.log(`  Max ID:    ${fmtCount(maxId)}`);
+	console.log(`  Total:     ${(totalMs / 1000).toFixed(1)}s`);
 }
 
 main().catch((err) => {
