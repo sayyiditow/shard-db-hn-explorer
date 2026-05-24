@@ -31,3 +31,4 @@ db.env.*
 !db.env.example
 *.log
 tmp/
+.hn-refresh-state.json
