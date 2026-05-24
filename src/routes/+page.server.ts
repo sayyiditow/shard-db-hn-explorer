@@ -1,4 +1,5 @@
 import { shardDb, isError } from '$lib/shard-db/client';
+import { getCached, canonicalKey, windowAnchor } from '$lib/refresh-cache';
 import type { Story, Comment } from '$lib/hn/types';
 import type { PageServerLoad } from './$types';
 
@@ -40,6 +41,15 @@ const SORT_FIELDS: Record<Sort, string> = {
  *  computed field. 30 days is enough to surface anything currently
  *  active without slipping into bygone-classics territory. */
 const HOT_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+
+/** Cache-then-fallthrough: returns the cached result if present,
+ *  otherwise issues the live query.  Read-only — never populates
+ *  the cache (that's the refresh re-warm's job). */
+async function cachedQuery<T>(payload: Record<string, unknown>): Promise<T | { error: string }> {
+	const hit = getCached(canonicalKey(payload));
+	if (hit !== null) return hit as T;
+	return shardDb.query<T>(payload);
+}
 
 /** Category combines `type` (enum bitmap) with optional title prefix
  *  to surface HN's signature derived categories (Ask HN, Show HN).
@@ -139,14 +149,14 @@ export const load: PageServerLoad = async ({ url }) => {
 
 	const windowMs = WINDOW_MS[win];
 	if (windowMs != null) {
-		const since = Date.now() - windowMs;
+		const since = windowAnchor() - windowMs;
 		criteria.push({ field: 'time', op: 'gte', value: since });
 	} else if (sort === 'hot') {
 		// `hot` carries an implicit recency window even when the visitor
 		// hasn't picked one — "hot all time" is just "popularity all time".
 		// Honour the explicit window if set; only inject the implicit one
 		// for the default `all` selection.
-		const since = Date.now() - HOT_WINDOW_MS;
+		const since = windowAnchor() - HOT_WINDOW_MS;
 		criteria.push({ field: 'time', op: 'gte', value: since });
 	}
 
@@ -208,11 +218,11 @@ export const load: PageServerLoad = async ({ url }) => {
 	// object) so they're <10ms cold and basically free warm — cheap
 	// enough to fire on every home-page load.
 	const [pageResp, countResp, storiesTotal, commentsTotal, usersTotal] = await Promise.all([
-		shardDb.query(findQuery),
-		shardDb.query({ mode: 'count', dir: 'hn', object: sourceObject, criteria }),
-		shardDb.query<number>({ mode: 'count', dir: 'hn', object: 'stories' }),
-		shardDb.query<number>({ mode: 'count', dir: 'hn', object: 'comments' }),
-		shardDb.query<number>({ mode: 'count', dir: 'hn', object: 'users' })
+		cachedQuery(findQuery),
+		cachedQuery({ mode: 'count', dir: 'hn', object: sourceObject, criteria }),
+		cachedQuery<number>({ mode: 'count', dir: 'hn', object: 'stories' }),
+		cachedQuery<number>({ mode: 'count', dir: 'hn', object: 'comments' }),
+		cachedQuery<number>({ mode: 'count', dir: 'hn', object: 'users' })
 	]);
 
 	const queryMs = performance.now() - t0;
