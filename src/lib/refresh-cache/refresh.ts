@@ -18,6 +18,18 @@ import { enumerateKeys } from './keys';
 
 const DIR = 'hn';
 
+/** yyyy-MM-dd HH:mm:ss timestamp for log lines.  Cheap (no
+ *  Intl.DateTimeFormat round-trip); fits the existing console.log
+ *  shape without pulling in a logger dependency. */
+function logTs(): string {
+	const d = new Date();
+	const pad = (n: number) => String(n).padStart(2, '0');
+	return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+const logInfo = (msg: string): void => console.log(`${logTs()} INFO  [refresh] ${msg}`);
+const logWarn = (msg: string): void => console.warn(`${logTs()} WARN  [refresh] ${msg}`);
+const logErr  = (msg: string): void => console.error(`${logTs()} ERROR [refresh] ${msg}`);
+
 export interface TickResult {
 	upserted: { stories: number; comments: number; users: number; total: number };
 	maxItem: number;
@@ -72,14 +84,14 @@ async function rewarmCache(client: NonNullable<TickDeps['client']>): Promise<voi
 	for (const entry of enumerateKeys()) {
 		const r = await client.query(entry.query);
 		if (isError(r)) {
-			console.warn(`[refresh] rewarm: query failed for ${entry.key}: ${(r as { error: string }).error}`);
+			logWarn(`rewarm: query failed for ${entry.key}: ${(r as { error: string }).error}`);
 			failed++;
 			continue;
 		}
 		newMap.set(entry.key, { result: r, mtime: Date.now() });
 	}
 	cache.swap(newMap);
-	console.log(`[refresh] rewarmed cache: ${newMap.size} slots (${failed} failed) in ${Date.now() - t0}ms`);
+	logInfo(`rewarmed cache: ${newMap.size} slots (${failed} failed) in ${Date.now() - t0}ms`);
 }
 
 export async function tick(deps: TickDeps = {}): Promise<TickResult> {
@@ -88,13 +100,13 @@ export async function tick(deps: TickDeps = {}): Promise<TickResult> {
 
 	const t0 = Date.now();
 	const lastSeen = await state.read();
-	console.log(`[refresh] tick start: last_seen_id=${lastSeen}`);
+	logInfo(`tick start: last_seen_id=${lastSeen}`);
 
 	let maxItem: number;
 	try {
 		maxItem = await api.getMaxItem();
 	} catch (e) {
-		console.error(`[refresh] tick aborted: getMaxItem failed: ${(e as Error).message}`);
+		logErr(`tick aborted: getMaxItem failed: ${(e as Error).message}`);
 		return emptyResult(lastSeen, `getMaxItem failed: ${(e as Error).message}`);
 	}
 
@@ -110,9 +122,9 @@ export async function tick(deps: TickDeps = {}): Promise<TickResult> {
 	if (lastSeen === 0) {
 		effectiveLastSeen = maxItem;
 		await state.write(maxItem);
-		console.log(`[refresh] first run: seeded last_seen_id=${maxItem} (no backfill)`);
+		logInfo(`first run: seeded last_seen_id=${maxItem} (no backfill)`);
 	} else {
-		console.log(`[refresh] HN maxitem=${maxItem} (delta=${maxItem - lastSeen})`);
+		logInfo(`HN maxitem=${maxItem} (delta=${maxItem - lastSeen})`);
 	}
 
 	let storiesInserted = 0, commentsInserted = 0, usersInserted = 0;
@@ -121,10 +133,10 @@ export async function tick(deps: TickDeps = {}): Promise<TickResult> {
 		const ids: number[] = [];
 		for (let i = effectiveLastSeen + 1; i <= maxItem; i++) ids.push(i);
 
-		console.log(`[refresh] fetching ${ids.length} items from HN (concurrency=16)...`);
+		logInfo(`fetching ${ids.length} items from HN (concurrency=16)...`);
 		const tFetch = Date.now();
 		const items = await api.getItemsConcurrent(ids, 16);
-		console.log(`[refresh] fetched ${items.length} items in ${Date.now() - tFetch}ms (${ids.length - items.length} dropped/deleted)`);
+		logInfo(`fetched ${items.length} items in ${Date.now() - tFetch}ms (${ids.length - items.length} dropped/deleted)`);
 
 		const stories: ShardRecord[] = [];
 		const comments: ShardRecord[] = [];
@@ -180,7 +192,7 @@ export async function tick(deps: TickDeps = {}): Promise<TickResult> {
 			value: { karma: 0, created: 0, about: '', submitted_count: 0 }
 		}));
 
-		console.log(`[refresh] partitioned: ${stories.length} stories, ${comments.length} comments, ${uniqueUsers.size} unique users`);
+		logInfo(`partitioned: ${stories.length} stories, ${comments.length} comments, ${uniqueUsers.size} unique users`);
 
 		try {
 			const tUpsert = Date.now();
@@ -213,9 +225,9 @@ export async function tick(deps: TickDeps = {}): Promise<TickResult> {
 				})());
 			}
 			await Promise.all(tasks);
-			console.log(`[refresh] upserted: stories=${storiesInserted} comments=${commentsInserted} users=${usersInserted} in ${Date.now() - tUpsert}ms`);
+			logInfo(`upserted: stories=${storiesInserted} comments=${commentsInserted} users=${usersInserted} in ${Date.now() - tUpsert}ms`);
 		} catch (e) {
-			console.error(`[refresh] upsert failed: ${(e as Error).message}`);
+			logErr(`upsert failed: ${(e as Error).message}`);
 			return emptyResult(lastSeen, (e as Error).message);
 		}
 
@@ -226,7 +238,7 @@ export async function tick(deps: TickDeps = {}): Promise<TickResult> {
 	if (total > 0 || cache.stats().size === 0) {
 		await rewarmCache(client);
 	}
-	console.log(`[refresh] tick done in ${Date.now() - t0}ms (upserted=${total})`);
+	logInfo(`tick done in ${Date.now() - t0}ms (upserted=${total})`);
 	return {
 		upserted: { stories: storiesInserted, comments: commentsInserted, users: usersInserted, total },
 		maxItem
@@ -244,9 +256,9 @@ export function start(): void {
 	if (g_started) return;
 	g_started = true;
 
-	void tick().catch((e) => console.error('[refresh] initial tick:', e));
+	void tick().catch((e) => logErr(`initial tick: ${(e as Error).message}`));
 	g_interval = setInterval(
-		() => { void tick().catch((e) => console.error('[refresh] tick:', e)); },
+		() => { void tick().catch((e) => logErr(`tick: ${(e as Error).message}`)); },
 		REFRESH_INTERVAL_MS
 	);
 }
@@ -258,4 +270,19 @@ export function stopForTesting(): void {
 		g_interval = null;
 	}
 	g_started = false;
+}
+
+/** HMR cleanup: when SvelteKit/Vite hot-reloads this module, the old
+ *  module instance's `setInterval` would otherwise keep firing in the
+ *  background — and on top of that, the new module instance would
+ *  schedule its own.  `import.meta.hot.dispose` runs right before
+ *  the old module is unloaded, so we cancel the timer there.  The
+ *  shared cache state on globalThis is untouched (good — the new
+ *  module instance binds to the same singleton). */
+if (import.meta.hot) {
+	import.meta.hot.dispose(() => {
+		if (g_interval) clearInterval(g_interval);
+		g_interval = null;
+		g_started = false;
+	});
 }
