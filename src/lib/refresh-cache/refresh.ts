@@ -13,6 +13,8 @@ import { shardDb as defaultClient, isError } from '$lib/shard-db/client';
 import * as state from './state';
 import * as defaultHn from './hn-api';
 import type { HnItem } from './hn-api';
+import * as cache from './cache';
+import { enumerateKeys } from './keys';
 
 const DIR = 'hn';
 
@@ -58,6 +60,23 @@ async function resolveStoryRoot(
 }
 
 interface ShardRecord { key: string; value: Record<string, unknown>; }
+
+/** Rebuild the entire cache map from shard-db.  Sequential per-query
+ *  is fine (~120 queries × ~5 ms warmed = under a second total); we
+ *  don't need Promise.all here.  Per-slot errors are logged-and-
+ *  dropped so a single broken query doesn't poison the whole cache. */
+async function rewarmCache(client: NonNullable<TickDeps['client']>): Promise<void> {
+	const newMap = new Map<string, cache.Entry>();
+	for (const entry of enumerateKeys()) {
+		const r = await client.query(entry.query);
+		if (isError(r)) {
+			console.warn(`[refresh] rewarm: query failed for ${entry.key}: ${(r as { error: string }).error}`);
+			continue;
+		}
+		newMap.set(entry.key, { result: r, mtime: Date.now() });
+	}
+	cache.swap(newMap);
+}
 
 export async function tick(deps: TickDeps = {}): Promise<TickResult> {
 	const client = deps.client ?? defaultClient;
@@ -186,6 +205,9 @@ export async function tick(deps: TickDeps = {}): Promise<TickResult> {
 	}
 
 	const total = storiesInserted + commentsInserted + usersInserted;
+	if (total > 0 || cache.stats().size === 0) {
+		await rewarmCache(client);
+	}
 	return {
 		upserted: { stories: storiesInserted, comments: commentsInserted, users: usersInserted, total },
 		maxItem
