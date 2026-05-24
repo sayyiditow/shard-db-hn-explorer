@@ -8,4 +8,4 @@
 
 export { start } from './refresh';
 export { get as getCached, stats } from './cache';
-export { canonicalKey } from './keys';
+export { canonicalKey, windowAnchor } from './keys';

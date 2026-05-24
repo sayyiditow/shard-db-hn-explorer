@@ -35,6 +35,18 @@ const WINDOW_MS: Record<Win, number | null> = {
 const HOT_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 const SORT_FIELDS: Record<Sort, string> = { popularity: 'score', newest: 'time', hot: 'score' };
 
+/** Snap `now` to the most recent 5-min bucket boundary.  Both the
+ *  cache rewarm and the route's request-time criteria construction
+ *  call this so they produce identical `time gte` values within the
+ *  bucket — otherwise the embedded epoch-ms drifts and every
+ *  windowed cache key becomes a miss.  When the bucket advances
+ *  between rewarm and a route call, lookups miss naturally until the
+ *  next refresh tick rebuilds the cache. */
+export const REWARM_BUCKET_MS = 5 * 60 * 1000;
+export function windowAnchor(now: number = Date.now()): number {
+    return Math.floor(now / REWARM_BUCKET_MS) * REWARM_BUCKET_MS;
+}
+
 export interface CacheEntry {
     key: string;
     query: Record<string, unknown>;
@@ -92,11 +104,12 @@ function buildCriteria(
             criteria.push({ field: 'type', op: 'in', value: 'story,job,poll' });
     }
 
+    const anchor = windowAnchor(referenceNowMs);
     const windowMs = WINDOW_MS[win];
     if (windowMs !== null) {
-        criteria.push({ field: 'time', op: 'gte', value: referenceNowMs - windowMs });
+        criteria.push({ field: 'time', op: 'gte', value: anchor - windowMs });
     } else if (sort === 'hot') {
-        criteria.push({ field: 'time', op: 'gte', value: referenceNowMs - HOT_WINDOW_MS });
+        criteria.push({ field: 'time', op: 'gte', value: anchor - HOT_WINDOW_MS });
     }
 
     let order_by = SORT_FIELDS[sort];
