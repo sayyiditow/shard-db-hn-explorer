@@ -1,6 +1,14 @@
 import { shardDb, isError } from '$lib/shard-db/client';
+import { getCached, canonicalKey, windowAnchor } from '$lib/refresh-cache';
 import type { Story } from '$lib/hn/types';
 import type { PageServerLoad } from './$types';
+
+/** Cache-then-fallthrough — same shape as +page.server.ts. */
+async function cachedQuery<T>(payload: Record<string, unknown>): Promise<T | { error: string }> {
+	const hit = getCached(canonicalKey(payload));
+	if (hit !== null) return hit as T;
+	return shardDb.query<T>(payload);
+}
 
 /** Lookback windows the user can switch between via ?window=. */
 type Window = '1h' | '24h' | '7d' | 'all';
@@ -22,8 +30,11 @@ export const load: PageServerLoad = async ({ url }) => {
 	const win: Window = (rawWin in WINDOW_MS ? rawWin : '24h') as Window;
 	const windowMs = WINDOW_MS[win];
 
-	const now = Date.now();
-	const since = windowMs == null ? 0 : now - windowMs;
+	// Use windowAnchor so the route's time threshold matches the
+	// cache rewarm pass — same trick as +page.server.ts. `since` is
+	// also computed off the anchor for the display badge.
+	const anchor = windowAnchor();
+	const since = windowMs == null ? 0 : anchor - windowMs;
 
 	const baseCrit: object[] = [
 		{ field: 'type', op: 'eq', value: 'story' },
@@ -39,7 +50,7 @@ export const load: PageServerLoad = async ({ url }) => {
 		// Top stories by score within the window. Default array shape
 		// preserves shard-db's order_by; format:dict would reshuffle by
 		// JS integer-key sort and lose the sort.
-		shardDb.query({
+		cachedQuery({
 			mode: 'find',
 			dir: 'hn',
 			object: 'stories',
@@ -49,7 +60,7 @@ export const load: PageServerLoad = async ({ url }) => {
 			limit: TOP_STORIES_LIMIT
 		}),
 		// Total story count in the window — sanity figure for the timing badge
-		shardDb.query({
+		cachedQuery({
 			mode: 'count',
 			dir: 'hn',
 			object: 'stories',
