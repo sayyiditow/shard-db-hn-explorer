@@ -25,6 +25,16 @@ import {
 } from 'hyparquet';
 import { ShardDbClient, isError } from '../src/lib/shard-db/client';
 import { write as writeRefreshState, STATE_PATH as REFRESH_STATE_PATH } from '../src/lib/refresh-cache/state';
+import { truncateBytes } from '../src/lib/refresh-cache/truncate';
+
+// Field byte-budgets mirror scripts/setup-schema.ts and refresh.ts.
+// shard-db rejects inserts with varchar content > N bytes; we
+// pre-truncate (with a trailing "...") to stay within bounds.
+const MAX_STORY_URL    = 512;
+const MAX_STORY_TITLE  = 128;
+const MAX_STORY_TEXT   = 4096;
+const MAX_COMMENT_TEXT = 4096;
+const MAX_USER_ABOUT   = 1024;
 
 const HF_BASE = 'https://huggingface.co/datasets/anantn/hacker-news/resolve/main';
 const ITEMS_URL = `${HF_BASE}/items.parquet`;
@@ -176,7 +186,7 @@ async function loadUsers(pool: ShardDbClient[]): Promise<number> {
 			value: {
 				karma: n(u.karma),
 				created: toMs(u.created),
-				about: u.about ?? '',
+				about: truncateBytes(u.about ?? '', MAX_USER_ABOUT),
 				submitted_count: Array.isArray(u.submitted) ? u.submitted.length : 0
 			}
 		}));
@@ -246,12 +256,12 @@ async function loadItems(pool: ShardDbClient[]): Promise<{ stories: number; comm
 						by: r.by ?? '',
 						time: toMs(r.time),
 						score: n(r.score),
-						url: r.url ?? '',
-						title: r.title ?? '',
+						url: truncateBytes(r.url ?? '', MAX_STORY_URL),
+						title: truncateBytes(r.title ?? '', MAX_STORY_TITLE),
 						// Self-post body — Ask HN / poll / job listings often have
 						// content in `text` instead of (or alongside) `url`. Empty
 						// string for link-only stories.
-						text: r.text ?? '',
+						text: truncateBytes(r.text ?? '', MAX_STORY_TEXT),
 						descendants: n(r.descendants),
 						type: r.type ?? 'story',
 						deleted: !!r.deleted,
@@ -267,7 +277,7 @@ async function loadItems(pool: ShardDbClient[]): Promise<{ stories: number; comm
 						parent: n(r.parent),
 						// story_root resolved in second pass below
 						story_root: 0,
-						text: r.text ?? '',
+						text: truncateBytes(r.text ?? '', MAX_COMMENT_TEXT),
 						deleted: !!r.deleted,
 						dead: !!r.dead
 					}
@@ -360,9 +370,17 @@ async function main() {
 	// parquet leaves off.  Without this, the first refresh tick on a
 	// fresh deployment would seed last_seen_id at "current HN maxitem"
 	// and skip every item between the snapshot date and "now."
-	if (maxId > 0) {
+	//
+	// ONLY for full snapshots (BULK_TARGET=0).  Sample loads read the
+	// parquet's *oldest* N rows (ancient IDs), so seeding state from
+	// their maxId would cause the refresh tick to try backfilling tens
+	// of millions of items.  Operators doing a sample load can manage
+	// .hn-refresh-state.json manually.
+	if (BULK_TARGET === 0 && maxId > 0) {
 		await writeRefreshState(maxId);
 		console.log(`  Wrote ${REFRESH_STATE_PATH} with last_seen_id=${maxId}`);
+	} else if (maxId > 0) {
+		console.log(`  Skipped ${REFRESH_STATE_PATH} write (partial load, BULK_TARGET=${BULK_TARGET}) — manage refresh state manually if you want the 5-min loop to backfill from here`);
 	}
 
 	console.log('\nDone.');

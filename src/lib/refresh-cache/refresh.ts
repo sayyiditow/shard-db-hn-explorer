@@ -15,6 +15,16 @@ import * as defaultHn from './hn-api';
 import type { HnItem } from './hn-api';
 import * as cache from './cache';
 import { enumerateKeys } from './keys';
+import { truncateBytes } from './truncate';
+
+// Field byte-budgets mirror scripts/setup-schema.ts. Keep in sync:
+// shard-db rejects inserts with varchar content > N bytes, so we
+// pre-truncate every potentially-long field here. The ellipsis ("...")
+// added by truncateBytes is the user-visible "this was cut off" signal.
+const MAX_STORY_URL    = 512;
+const MAX_STORY_TITLE  = 128;
+const MAX_STORY_TEXT   = 4096;
+const MAX_COMMENT_TEXT = 4096;
 
 const DIR = 'hn';
 
@@ -26,8 +36,8 @@ function logTs(): string {
 	const pad = (n: number) => String(n).padStart(2, '0');
 	return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
-const logInfo = (msg: string): void => console.log(`${logTs()} INFO  [refresh] ${msg}`);
-const logWarn = (msg: string): void => console.warn(`${logTs()} WARN  [refresh] ${msg}`);
+const logInfo = (msg: string): void => console.log(`${logTs()} INFO [refresh] ${msg}`);
+const logWarn = (msg: string): void => console.warn(`${logTs()} WARN [refresh] ${msg}`);
 const logErr  = (msg: string): void => console.error(`${logTs()} ERROR [refresh] ${msg}`);
 
 export interface TickResult {
@@ -154,9 +164,9 @@ export async function tick(deps: TickDeps = {}): Promise<TickResult> {
 						by: it.by ?? '',
 						time: toMs(it.time),
 						score: it.score ?? 0,
-						url: it.url ?? '',
-						title: it.title ?? '',
-						text: it.text ?? '',
+						url: truncateBytes(it.url ?? '', MAX_STORY_URL),
+						title: truncateBytes(it.title ?? '', MAX_STORY_TITLE),
+						text: truncateBytes(it.text ?? '', MAX_STORY_TEXT),
 						descendants: it.descendants ?? 0,
 						type: it.type,
 						deleted: !!it.deleted,
@@ -172,7 +182,7 @@ export async function tick(deps: TickDeps = {}): Promise<TickResult> {
 						time: toMs(it.time),
 						parent: it.parent ?? 0,
 						story_root,
-						text: it.text ?? '',
+						text: truncateBytes(it.text ?? '', MAX_COMMENT_TEXT),
 						deleted: !!it.deleted,
 						dead: !!it.dead
 					}
