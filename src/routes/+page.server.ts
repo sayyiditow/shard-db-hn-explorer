@@ -1,5 +1,5 @@
 import { shardDb, isError } from '$lib/shard-db/client';
-import { getCached, canonicalKey } from '$lib/refresh-cache';
+import { getCached, canonicalKey, windowAnchor } from '$lib/refresh-cache';
 import type { Story, Comment } from '$lib/hn/types';
 import type { PageServerLoad } from './$types';
 
@@ -149,14 +149,14 @@ export const load: PageServerLoad = async ({ url }) => {
 
 	const windowMs = WINDOW_MS[win];
 	if (windowMs != null) {
-		const since = Date.now() - windowMs;
+		const since = windowAnchor() - windowMs;
 		criteria.push({ field: 'time', op: 'gte', value: since });
 	} else if (sort === 'hot') {
 		// `hot` carries an implicit recency window even when the visitor
 		// hasn't picked one — "hot all time" is just "popularity all time".
 		// Honour the explicit window if set; only inject the implicit one
 		// for the default `all` selection.
-		const since = Date.now() - HOT_WINDOW_MS;
+		const since = windowAnchor() - HOT_WINDOW_MS;
 		criteria.push({ field: 'time', op: 'gte', value: since });
 	}
 

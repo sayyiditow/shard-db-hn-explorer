@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { canonicalKey, enumerateKeys } from './keys';
+import { canonicalKey, enumerateKeys, windowAnchor, REWARM_BUCKET_MS } from './keys';
 
 describe('canonicalKey', () => {
     test('produces stable strings regardless of object key order', () => {
@@ -52,5 +52,61 @@ describe('enumerateKeys', () => {
             expect(typeof e.key).toBe('string');
             expect(typeof e.query).toBe('object');
         }
+    });
+});
+
+describe('windowAnchor', () => {
+    test('snaps to floor(now / REWARM_BUCKET_MS) * REWARM_BUCKET_MS', () => {
+        const t = REWARM_BUCKET_MS * 7 + 12345;
+        expect(windowAnchor(t)).toBe(REWARM_BUCKET_MS * 7);
+    });
+
+    test('two calls inside the same bucket return the same anchor', () => {
+        const t1 = REWARM_BUCKET_MS * 3 + 100;
+        const t2 = REWARM_BUCKET_MS * 3 + REWARM_BUCKET_MS - 1;
+        expect(windowAnchor(t1)).toBe(windowAnchor(t2));
+    });
+
+    test('crossing a bucket boundary advances the anchor', () => {
+        const t1 = REWARM_BUCKET_MS * 5 + REWARM_BUCKET_MS - 1;
+        const t2 = REWARM_BUCKET_MS * 5 + REWARM_BUCKET_MS;
+        expect(windowAnchor(t1)).not.toBe(windowAnchor(t2));
+    });
+});
+
+describe('keys time-window alignment', () => {
+    test('enumerator and route produce identical canonical key for windowed find', () => {
+        // Simulate: rewarm and route both fire inside the same bucket.
+        const t = REWARM_BUCKET_MS * 100 + 12345;
+        const anchor = windowAnchor(t);
+
+        // What the enumerator would emit for (category='', sort='popularity', window='24h'):
+        const enumerated = Array.from(enumerateKeys(t)).find((e) => {
+            const q = e.query as Record<string, unknown>;
+            if (q.mode !== 'find') return false;
+            const criteria = q.criteria as Array<{ field: string; op: string; value: unknown }>;
+            return criteria.some((c) => c.field === 'time' && c.op === 'gte');
+        });
+        expect(enumerated).toBeDefined();
+
+        // What the route would build for the same combo at the same anchor.
+        // Replicate the route's filter set verbatim — anchor minus 24h.
+        const routeFindQuery = {
+            mode: 'find',
+            dir: 'hn',
+            object: 'stories',
+            criteria: [
+                { field: 'dead',    op: 'eq', value: 'false' },
+                { field: 'deleted', op: 'eq', value: 'false' },
+                { field: 'type',    op: 'in', value: 'story,job,poll' },
+                { field: 'time',    op: 'gte', value: anchor - 24 * 60 * 60 * 1000 }
+            ],
+            order_by: 'score',
+            order: 'desc',
+            limit: 25,
+            cursor: null
+        };
+
+        expect(canonicalKey(routeFindQuery)).toBe(enumerated!.key);
     });
 });
