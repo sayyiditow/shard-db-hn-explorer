@@ -7,25 +7,41 @@
  *  return; time-based expiry would just force re-warm work without
  *  changing what's served.
  *
- *  Read path is lock-free: JS assignment to a module-level binding
- *  is atomic from the consumer's POV. */
+ *  HMR-safe: state lives on globalThis behind a Symbol.for() key.
+ *  When SvelteKit/Vite re-imports this module during dev (on source
+ *  edits), the new module instance binds to the SAME shared state as
+ *  the previous one, so the route layer's cache reads and the
+ *  refresh layer's cache writes can't end up on separate module
+ *  singletons.  Production builds don't HMR; the indirection is free.
+ *
+ *  Read path is lock-free: JS assignment to the shared `state.map`
+ *  reference is atomic from the consumer's POV. */
 
 export interface Entry {
     result: unknown;
     mtime: number;
 }
 
-let g_map: Map<string, Entry> = new Map();
-let g_lastSwapAt: number | null = null;
+interface CacheState {
+    map: Map<string, Entry>;
+    lastSwapAt: number | null;
+}
+
+const GLOBAL_KEY = Symbol.for('shardDb.refreshCache.state.v1');
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const G = globalThis as any;
+G[GLOBAL_KEY] ??= { map: new Map<string, Entry>(), lastSwapAt: null } satisfies CacheState;
+const state: CacheState = G[GLOBAL_KEY];
 
 export function get(key: string): unknown | null {
-    const e = g_map.get(key);
+    const e = state.map.get(key);
     return e ? e.result : null;
 }
 
 export function swap(newMap: Map<string, Entry>): void {
-    g_map = newMap;
-    g_lastSwapAt = Date.now();
+    state.map = newMap;
+    state.lastSwapAt = Date.now();
 }
 
 export interface Stats {
@@ -34,11 +50,11 @@ export interface Stats {
 }
 
 export function stats(): Stats {
-    return { size: g_map.size, lastSwapAt: g_lastSwapAt };
+    return { size: state.map.size, lastSwapAt: state.lastSwapAt };
 }
 
 /** Test-only — wipes the cache to a known empty state. */
 export function clearForTesting(): void {
-    g_map = new Map();
-    g_lastSwapAt = null;
+    state.map = new Map();
+    state.lastSwapAt = null;
 }
