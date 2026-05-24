@@ -13,6 +13,10 @@
 
 import net from 'node:net';
 
+/** No-op data sink for idle pool sockets — see installIdleMarkers().
+ *  Defined at module scope so removeListener can target it by identity. */
+function noopDrain(_chunk: Buffer | string): void { /* discard */ }
+
 export interface ShardDbClientOptions {
 	host?: string;
 	port?: number;
@@ -113,25 +117,78 @@ export class ShardDbClient {
 
 	// ── pool ──────────────────────────────────────────────────────
 
-	/** Borrow a socket — either an idle one or a fresh connection. */
+	/** True iff the socket is in a usable, fully-connected state.  Catches:
+	 *   - sockets we've already destroyed
+	 *   - sockets the idle-time markers below flagged as dead (server FIN)
+	 *   - half-open sockets that can only read or only write
+	 *
+	 * Why both `_poolDead` AND the standard flags? When a socket sits idle
+	 * with no JS listeners attached, the libuv side still receives the
+	 * server's FIN — but Node's high-level Socket state (destroyed /
+	 * readyState) may not update synchronously until a read or write is
+	 * attempted. We attach a `close`/`error` once-listener while idle that
+	 * flips `_poolDead` the moment libuv delivers the close event,
+	 * regardless of whether anyone is currently reading. acquire() then
+	 * has a reliable "this is dead" signal to consult. */
+	private isAlive(sock: net.Socket): boolean {
+		if ((sock as unknown as { _poolDead?: boolean })._poolDead) return false;
+		return !sock.destroyed
+			&& sock.readable
+			&& sock.writable
+			&& sock.readyState === 'open';
+	}
+
+	/** Mark a socket dead from a libuv close/error event while it sits idle.
+	 *  Why the no-op `data` listener too: a TCP socket without a `data`
+	 *  listener is in PAUSED mode, and libuv may not deliver close/end
+	 *  events promptly because it's not polling EPOLLIN.  Attaching a
+	 *  data listener flips the socket back to flowing mode so libuv
+	 *  keeps polling — close/end events then fire as soon as the kernel
+	 *  delivers FIN.  The pool protocol means we should never actually
+	 *  receive data while idle (the server replies once per request and
+	 *  the read is complete by the time release() runs), so the data
+	 *  listener is effectively a "keep the fd live" beacon. */
+	private installIdleMarkers(sock: net.Socket) {
+		const mark = () => { (sock as unknown as { _poolDead?: boolean })._poolDead = true; };
+		sock.once('close', mark);
+		sock.once('error', mark);
+		sock.once('end', mark);
+		sock.on('data', noopDrain);
+	}
+
+	/** Remove the idle-time markers when borrowing the socket back for a
+	 *  query — query()'s own listeners take over and we don't want a stray
+	 *  close-during-query to flip `_poolDead` mid-flight. */
+	private removeIdleMarkers(sock: net.Socket) {
+		sock.removeAllListeners('close');
+		sock.removeAllListeners('error');
+		sock.removeAllListeners('end');
+		sock.removeListener('data', noopDrain);
+	}
+
+	/** Borrow a socket — drain dead idles first, then fall through to a
+	 *  fresh connect.  After a shard-db restart the pool is full of dead
+	 *  sockets (server-side FIN already delivered, _poolDead flipped); we
+	 *  destroy them silently here so the user-facing query sees a live
+	 *  connection on its very first attempt. */
 	private async acquire(): Promise<net.Socket> {
-		if (this.idle.length > 0) {
+		while (this.idle.length > 0) {
 			const sock = this.idle.pop()!;
-			// Quick liveness check: if the socket is dead (fd closed)
-			// a write will throw. We catch it synchronously below.
-			// For now we optimistically return it; the write in query()
-			// will fail and trigger a retry.
-			return sock;
+			this.removeIdleMarkers(sock);
+			if (this.isAlive(sock)) return sock;
+			sock.destroy();
 		}
 		return this.connect();
 	}
 
-	/** Return a socket to the pool, or discard if the pool is full
-	 *  or the socket is dead. */
+	/** Return a socket to the pool, or discard if the pool is full or the
+	 *  socket has gone bad during the query.  When pooling, attach the
+	 *  idle-time markers so a server-side close while idle gets caught. */
 	private release(sock: net.Socket) {
-		if (sock.destroyed || this.idle.length >= this.maxPoolSize) {
+		if (this.idle.length >= this.maxPoolSize || !this.isAlive(sock)) {
 			sock.destroy();
 		} else {
+			this.installIdleMarkers(sock);
 			this.idle.push(sock);
 		}
 	}
