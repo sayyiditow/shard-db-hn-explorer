@@ -175,4 +175,99 @@ export function* enumerateKeys(referenceNowMs: number = Date.now()): Generator<C
             }
         }
     }
+
+    // /trending panel — one find + one count per window-tab.  Time
+    // thresholds use windowAnchor() so the route's request-time
+    // computation lines up with the cache key.
+    const trendingAnchor = windowAnchor(referenceNowMs);
+    const TRENDING_LIMIT = 30;
+    const trendingWindows: Array<{ name: string; ms: number | null }> = [
+        { name: '1h',  ms: 60 * 60 * 1000 },
+        { name: '24h', ms: 24 * 60 * 60 * 1000 },
+        { name: '7d',  ms: 7  * 24 * 60 * 60 * 1000 },
+        { name: 'all', ms: null }
+    ];
+    for (const win of trendingWindows) {
+        const trCrit: object[] = [
+            { field: 'type',    op: 'eq', value: 'story' },
+            { field: 'dead',    op: 'eq', value: 'false' },
+            { field: 'deleted', op: 'eq', value: 'false' }
+        ];
+        if (win.ms != null) {
+            trCrit.push({ field: 'time', op: 'gte', value: trendingAnchor - win.ms });
+        }
+        const trFind = {
+            mode: 'find',
+            dir: HN_DIR,
+            object: 'stories',
+            criteria: trCrit,
+            order_by: 'score',
+            order: 'desc',
+            limit: TRENDING_LIMIT
+        };
+        const trCount = {
+            mode: 'count',
+            dir: HN_DIR,
+            object: 'stories',
+            criteria: trCrit
+        };
+        for (const q of [trFind, trCount]) {
+            const key = canonicalKey(q);
+            if (!seen.has(key)) {
+                seen.add(key);
+                yield { key, query: q };
+            }
+        }
+    }
+
+    // /stats panel aggregates — three stable queries (no URL params),
+    // expensive (group_by + sort), perfect cache candidates.  Same
+    // shape every page load → cache key is deterministic.
+    const statsQueries: Record<string, unknown>[] = [
+        // Top story authors (group_by author, sum scores)
+        {
+            mode: 'aggregate',
+            dir: HN_DIR,
+            object: 'stories',
+            group_by: ['by'],
+            aggregates: [
+                { fn: 'count', alias: 'stories' },
+                { fn: 'sum', field: 'score', alias: 'total_score' }
+            ],
+            criteria: [{ field: 'type', op: 'eq', value: 'story' }],
+            order_by: 'stories',
+            order: 'desc',
+            limit: 20
+        },
+        // Top commenters (group_by author, count)
+        {
+            mode: 'aggregate',
+            dir: HN_DIR,
+            object: 'comments',
+            group_by: ['by'],
+            aggregates: [{ fn: 'count', alias: 'comments' }],
+            order_by: 'comments',
+            order: 'desc',
+            limit: 20
+        },
+        // Top users (find by karma desc — no aggregate, just an ordered scan)
+        {
+            mode: 'find',
+            dir: HN_DIR,
+            object: 'users',
+            criteria: [],
+            order_by: 'karma',
+            order: 'desc',
+            limit: 20,
+            fields: ['karma', 'created', 'submitted_count'],
+            format: 'dict'
+        }
+    ];
+    for (const q of statsQueries) {
+        const key = canonicalKey(q);
+        if (!seen.has(key)) {
+            seen.add(key);
+            yield { key, query: q };
+        }
+    }
 }

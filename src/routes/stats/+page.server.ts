@@ -1,4 +1,5 @@
 import { shardDb, isError } from '$lib/shard-db/client';
+import { getCached, canonicalKey } from '$lib/refresh-cache';
 import type { PageServerLoad } from './$types';
 
 /** One panel = one shard-db query + the JSON we sent + the ms it took.
@@ -33,7 +34,10 @@ function toNum(v: unknown): number {
 
 async function timed<T>(query: Record<string, unknown>): Promise<Panel<T>> {
 	const t0 = performance.now();
-	const resp = await shardDb.query(query);
+	// Cache-then-fallthrough: counts/aggregates here are pre-warmed
+	// by the refresh-cache module (see keys.ts → enumerateKeys).
+	const hit = getCached(canonicalKey(query));
+	const resp = hit !== null ? hit : await shardDb.query(query);
 	const ms = performance.now() - t0;
 	if (isError(resp)) {
 		return { query, ms, data: [] as unknown as T, error: resp.error };
