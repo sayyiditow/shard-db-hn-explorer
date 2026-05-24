@@ -125,7 +125,12 @@ async function main() {
 	console.log('\nSchema ready.');
 }
 
-main().catch((err) => {
-	console.error(err);
-	process.exit(1);
-});
+main()
+	.then(() => {
+		client.close();
+	})
+	.catch((err) => {
+		console.error(err);
+		client.close();
+		process.exit(1);
+	});

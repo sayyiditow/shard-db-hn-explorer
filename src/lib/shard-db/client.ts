@@ -193,6 +193,22 @@ export class ShardDbClient {
 		}
 	}
 
+	/** Destroy every idle pool socket.  Useful in one-shot scripts
+	 *  (setup-schema, bulk-load) so the Bun/Node process can exit
+	 *  cleanly once work is done — otherwise the pool's open sockets
+	 *  keep the event loop alive indefinitely.  Safe to call
+	 *  multiple times; new queries after close() will simply
+	 *  re-connect on demand. */
+	close(): void {
+		while (this.idle.length > 0) {
+			const sock = this.idle.pop();
+			if (sock) {
+				this.removeIdleMarkers(sock);
+				sock.destroy();
+			}
+		}
+	}
+
 	/** Create and await a fresh TCP connection. */
 	private connect(): Promise<net.Socket> {
 		return new Promise((resolve, reject) => {

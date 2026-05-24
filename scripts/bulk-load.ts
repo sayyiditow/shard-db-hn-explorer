@@ -389,6 +389,11 @@ async function main() {
 	console.log(`  Users:     ${fmtCount(userCount)}`);
 	console.log(`  Max ID:    ${fmtCount(maxId)}`);
 	console.log(`  Total:     ${(totalMs / 1000).toFixed(1)}s`);
+
+	// Drain every pooled socket so Bun's event loop can exit; without
+	// this the idle pool keeps the process alive after the work is done.
+	adminClient.close();
+	for (const c of pool) c.close();
 }
 
 main().catch((err) => {
