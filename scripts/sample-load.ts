@@ -209,7 +209,12 @@ async function main() {
 	console.log('  curl -s http://localhost:5173/api/count');
 }
 
-main().catch((err) => {
-	console.error(err);
-	process.exit(1);
-});
+main()
+	.then(() => {
+		client.close();
+	})
+	.catch((err) => {
+		console.error(err);
+		client.close();
+		process.exit(1);
+	});
