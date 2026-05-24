@@ -28,18 +28,21 @@ describe('enumerateKeys', () => {
     const all = Array.from(enumerateKeys());
 
     test('yields 3 top-level count entries', () => {
-        const tops = all.filter((e) => !('criteria' in (e.query as Record<string, unknown>)));
+        const tops = all.filter((e) => {
+            const q = e.query as Record<string, unknown>;
+            return q.mode === 'count' && !('criteria' in q);
+        });
         expect(tops.length).toBe(3);
         const objects = tops.map((t) => (t.query as { object: string }).object).sort();
         expect(objects).toEqual(['comments', 'stories', 'users']);
     });
 
-    test('yields some first-page query entries (count varies as duplicates collapse)', () => {
+    test('yields some criteria-bearing query entries (landing + trending + stats)', () => {
         const filtered = all.filter((e) => 'criteria' in (e.query as Record<string, unknown>));
         // Lower bound: at least one entry per unique non-comment category × {find, count}.
         expect(filtered.length).toBeGreaterThanOrEqual(50);
-        // Upper bound: never more than 7 categories × 3 sorts × 4 windows × 2 shapes = 168.
-        expect(filtered.length).toBeLessThanOrEqual(168);
+        // Upper bound: landing 7×3×4×2=168 + trending 4×2=8 + stats 3 (1 has criteria) = 177.
+        expect(filtered.length).toBeLessThanOrEqual(177);
     });
 
     test('every yielded key is unique (canonicalKey collapse handled by generator)', () => {
