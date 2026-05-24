@@ -100,4 +100,38 @@ describe('refresh tick', () => {
         expect(r.upserted.total).toBe(0);
         expect(await read()).toBe(100);
     });
+
+    test('upserts > 0 triggers cache rewarm', async () => {
+        await write(100);
+        const { deps } = makeDeps({
+            getMaxItem: async () => 101,
+            items: [
+                { id: 101, type: 'story', by: 'x', time: 1, title: 't', score: 1,
+                  url: '', text: '', descendants: 0, deleted: false, dead: false }
+            ] as HnItem[]
+        });
+        await tick(deps);
+        // Cache should be populated.  Don't assert an exact size — the
+        // unique-key count depends on canonicalKey collapse rules in
+        // keys.ts.  Just confirm it grew above zero.
+        expect(cache.stats().size).toBeGreaterThan(0);
+    });
+
+    test('cold-start (cache empty) rewarms even when upserts = 0', async () => {
+        await write(200);
+        const { deps } = makeDeps({ getMaxItem: async () => 200 });
+        await tick(deps);
+        expect(cache.stats().size).toBeGreaterThan(0);
+    });
+
+    test('idle tick with populated cache leaves cache unchanged', async () => {
+        // Seed the cache with a sentinel marker we can detect afterwards.
+        cache.swap(new Map([['sentinel', { result: 'untouched', mtime: 1 }]]));
+        const before = cache.stats().lastSwapAt;
+        await write(300);
+        const { deps } = makeDeps({ getMaxItem: async () => 300 });
+        await tick(deps);
+        expect(cache.stats().lastSwapAt).toBe(before);
+        expect(cache.get('sentinel')).toBe('untouched');
+    });
 });
