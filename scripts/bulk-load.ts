@@ -26,6 +26,7 @@ import {
 import { ShardDbClient, isError } from '../src/lib/shard-db/client';
 import { write as writeRefreshState, STATE_PATH as REFRESH_STATE_PATH } from '../src/lib/refresh-cache/state';
 import { truncateBytes } from '../src/lib/refresh-cache/truncate';
+import { INDEX_LISTS, indexFieldName } from './lib/hn-schema';
 
 // Field byte-budgets mirror scripts/setup-schema.ts and refresh.ts.
 // shard-db rejects inserts with varchar content > N bytes; we
@@ -145,6 +146,62 @@ async function bulkInsertParallel(
 			}
 		}
 	}
+}
+
+/**
+ * Strip every index off `object` so the subsequent bulk-insert pays
+ * zero per-(field, shard) merge cost. The per-chunk insert rate stays
+ * flat across the run instead of degrading O(R²) with chunk count
+ * — proven against shard-db at 25M with the same R = ~25 we'll see
+ * here at low-tens-of-millions and beyond. See docs/operations/
+ * bulk-loading.md in shard-db for the crossover rule.
+ *
+ * Idempotent: indexes already missing are ignored by the server.
+ */
+async function dropIndexes(client: ShardDbClient, object: string): Promise<void> {
+	const specs = INDEX_LISTS[object];
+	if (!specs || specs.length === 0) return;
+	const fields = specs.map(indexFieldName);
+	process.stdout.write(`  drop ${fields.length} indexes on hn/${object} ... `);
+	const resp = await client.query({
+		mode: 'remove-index',
+		dir: 'hn',
+		object,
+		fields
+	});
+	if (isError(resp)) {
+		// "no index" / "not found" is fine on first run or partial state
+		if (!/not found|no index|doesn't exist/i.test(resp.error)) {
+			throw new Error(`drop indexes on ${object}: ${resp.error}`);
+		}
+	}
+	console.log('ok');
+}
+
+/**
+ * Build all indexes in ONE storage scan. The plural add-index form
+ * (cmd_add_indexes server-side) accumulates entries for every listed
+ * field during a single walk over the data shards — versus N separate
+ * add-index calls which would each do their own full scan.
+ *
+ * Type suffixes (`title:trigram`, etc.) are preserved end-to-end; the
+ * server reads them from the JSON array and writes them into
+ * index.conf so the planner picks the right index type per op.
+ */
+async function addIndexes(client: ShardDbClient, object: string): Promise<void> {
+	const specs = INDEX_LISTS[object];
+	if (!specs || specs.length === 0) return;
+	process.stdout.write(`  add ${specs.length} indexes on hn/${object} (one scan) ... `);
+	const t0 = performance.now();
+	const resp = await client.query({
+		mode: 'add-index',
+		dir: 'hn',
+		object,
+		fields: specs
+	});
+	if (isError(resp)) throw new Error(`add indexes on ${object}: ${resp.error}`);
+	const ms = performance.now() - t0;
+	console.log(`${(ms / 1000).toFixed(1)}s`);
 }
 
 async function truncate(client: ShardDbClient, object: string): Promise<void> {
@@ -359,12 +416,34 @@ async function main() {
 	await truncate(adminClient, 'comments');
 	await truncate(adminClient, 'users');
 
+	/* Load-then-index pattern. At full-HN scale (hundreds of millions
+	   of items) the per-(field, shard) merge cost on indexed bulk-insert
+	   scales O(R²) in chunk count and dominates total wall time. We
+	   trade it for one extra pass (add-indexes at the end) that walks
+	   the data ONCE and builds every index in parallel per shard.
+	   Net win is ~2× at 25M and grows with scale. See docs/operations/
+	   bulk-loading.md in the shard-db repo. */
+	console.log('\nDropping indexes (load-then-index pattern):');
+	await dropIndexes(adminClient, 'stories');
+	await dropIndexes(adminClient, 'comments');
+	await dropIndexes(adminClient, 'users');
+
 	const pool = buildPool(PARALLEL_CONNS);
 
 	const totalStart = performance.now();
 	const userCount = await loadUsers(pool);
 	const { stories, comments, maxId } = await loadItems(pool);
-	const totalMs = performance.now() - totalStart;
+	const insertMs = performance.now() - totalStart;
+	console.log(`\nInsert phase total: ${(insertMs / 1000).toFixed(1)}s`);
+
+	console.log('\nBuilding indexes (one scan per object):');
+	const indexStart = performance.now();
+	await addIndexes(adminClient, 'users');
+	await addIndexes(adminClient, 'stories');
+	await addIndexes(adminClient, 'comments');
+	const indexMs = performance.now() - indexStart;
+	const totalMs = insertMs + indexMs;
+	console.log(`Index phase total: ${(indexMs / 1000).toFixed(1)}s`);
 
 	// Seed the refresh state file so the 5-min loop picks up where the
 	// parquet leaves off.  Without this, the first refresh tick on a

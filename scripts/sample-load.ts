@@ -4,9 +4,15 @@
  * the HN Firebase API and bulk-inserts them into shard-db.
  *
  * This is NOT the full bulk-load story — that comes via the Hugging
- * Face snapshot (see scripts/bulk-load.ts when written). This script
- * exists to let a developer go from `bun install` to a usable DB in
- * under a minute with a sensible mix of stories + comments + users.
+ * Face snapshot (see scripts/bulk-load.ts). This script exists to let
+ * a developer go from `bun install` to a usable DB in under a minute
+ * with a sensible mix of stories + comments + users.
+ *
+ * Why this script doesn't use load-then-index: at 10K items / 1K
+ * chunks (R ≈ 10) the per-(field, shard) merge cost is still cheap
+ * and pre-existing-indexes wins. The crossover into load-then-index
+ * territory is R ≥ ~20 (see docs/operations/bulk-loading.md in the
+ * shard-db repo). bulk-load.ts is where that pattern lives.
  *
  * Run: bun run scripts/sample-load.ts
  */
