@@ -45,6 +45,17 @@ const BULK_TARGET = parseTarget(process.env.BULK_TARGET ?? '1000000');
 const BULK_CHUNK = 5000;             // rows per bulk-insert call
 const PARALLEL_CONNS = 5;            // shard-db client pool size
 
+/* Items pipeline flushes stories + comments to shard-db every
+   FLUSH_EVERY_ITEMS records read, so peak Bun heap stays bounded
+   regardless of total item count. At 44M items × ~500 B/row the
+   accumulate-then-insert approach blew past 16 GB RAM and got OOM-
+   killed at ~32% during the first full-snapshot attempt (2026-05-25
+   on the Netcup deploy). 1M flush threshold = ~500 MB peak for the
+   batch arrays; itemMeta Map still grows monotonically (~3 GB at
+   44M items) but that's bounded by the dataset size, not by the
+   batch arrays. */
+const FLUSH_EVERY_ITEMS = 1_000_000;
+
 interface ItemRow {
 	id: bigint | number;
 	type: string;
@@ -272,15 +283,40 @@ async function loadItems(pool: ShardDbClient[]): Promise<{ stories: number; comm
 	const ROW_GROUP_HINT = Math.ceil(totalRows / rowGroups); // approx rows per group
 	console.log(`  target: ${fmtCount(targetRows)} items (≈${rowGroups > 0 ? Math.ceil(targetRows / ROW_GROUP_HINT) : 0} row groups)`);
 
+	/* itemMeta is needed for story_root resolution across the WHOLE
+	   dataset (a comment's parent may have been in any earlier row
+	   group). HN's parquet is sorted ascending by id, and parent ids
+	   are always lower than child ids, so by the time we see a
+	   comment, its parent is already in itemMeta — resolution can
+	   happen inline. itemMeta grows monotonically (~3 GB at 44M
+	   items) but that's bounded by the dataset; not the OOM trigger. */
 	const itemMeta = new Map<number, ItemMeta>();
-	const stories: { key: string; value: Record<string, unknown> }[] = [];
-	const comments: { key: string; value: Record<string, unknown> }[] = [];
-	// Track the highest HN item ID we ingest. After bulk-insert we write
-	// this to .hn-refresh-state.json so the 5-min refresh loop knows to
-	// start backfilling from maxId+1 onward (otherwise it would seed at
-	// "current HN maxitem" on first run and the parquet→now gap would
-	// be permanently lost).
+
+	/* Batch arrays are flushed every FLUSH_EVERY_ITEMS rows read so
+	   peak Bun heap from these stays bounded (~500 MB at the 1M
+	   threshold). Pre-2026-05-25 the loop accumulated all 44M items
+	   in these arrays and OOM-killed at ~32%. */
+	let stories: { key: string; value: Record<string, unknown> }[] = [];
+	let comments: { key: string; value: Record<string, unknown> }[] = [];
+	let totalStories = 0;
+	let totalComments = 0;
 	let maxId = 0;
+
+	const flushIfFull = async (final: boolean): Promise<void> => {
+		const have = stories.length + comments.length;
+		if (have === 0) return;
+		if (!final && have < FLUSH_EVERY_ITEMS) return;
+		if (stories.length > 0) {
+			await bulkInsertParallel(pool, 'stories', stories);
+			totalStories += stories.length;
+			stories = [];
+		}
+		if (comments.length > 0) {
+			await bulkInsertParallel(pool, 'comments', comments);
+			totalComments += comments.length;
+			comments = [];
+		}
+	};
 
 	let cursor = 0;
 	const t0 = performance.now();
@@ -296,12 +332,13 @@ async function loadItems(pool: ShardDbClient[]): Promise<{ stories: number; comm
 			rowEnd
 		})) as unknown as ItemRow[];
 
-		// Build parent-resolution map first; we walk it below for story_root.
+		// Build parent-resolution map for THIS row group's ids; later
+		// rows in the same group may reference earlier rows in the
+		// group, so populate the whole group before classifying.
 		for (const r of rows) {
 			itemMeta.set(n(r.id), { type: r.type ?? 'unknown', parent: n(r.parent) });
 		}
 
-		// Then split + shape
 		for (const r of rows) {
 			const id = n(r.id);
 			if (id > maxId) maxId = id;
@@ -326,14 +363,16 @@ async function loadItems(pool: ShardDbClient[]): Promise<{ stories: number; comm
 					}
 				});
 			} else if (r.type === 'comment') {
+				// Resolve story_root inline — parquet is sorted by id
+				// ascending and parents have lower ids, so itemMeta
+				// already contains the parent chain.
 				comments.push({
 					key: idStr,
 					value: {
 						by: r.by ?? '',
 						time: toMs(r.time),
 						parent: n(r.parent),
-						// story_root resolved in second pass below
-						story_root: 0,
+						story_root: findStoryRoot(id, itemMeta),
 						text: truncateBytes(r.text ?? '', MAX_COMMENT_TEXT),
 						deleted: !!r.deleted,
 						dead: !!r.dead
@@ -347,40 +386,21 @@ async function loadItems(pool: ShardDbClient[]): Promise<{ stories: number; comm
 		const pct = ((cursor / targetRows) * 100).toFixed(1);
 		console.log(
 			`  read ${fmtCount(cursor)} / ${fmtCount(targetRows)} (${pct}%) · ` +
-			`stories=${fmtCount(stories.length)} comments=${fmtCount(comments.length)} · ` +
+			`pending stories=${fmtCount(stories.length)} comments=${fmtCount(comments.length)} · ` +
+			`flushed stories=${fmtCount(totalStories)} comments=${fmtCount(totalComments)} · ` +
 			`${elapsed.toFixed(1)}s`
 		);
+
+		await flushIfFull(false);
 	}
+
+	// Final flush — anything left under the threshold.
+	await flushIfFull(true);
 
 	const readMs = performance.now() - t0;
-	console.log(`  parquet read+shape: ${(readMs / 1000).toFixed(1)}s`);
+	console.log(`  items pipeline: ${(readMs / 1000).toFixed(1)}s total`);
 
-	// Resolve story_root per-comment via parent walk. O(n × chain) but chains
-	// are short on HN; this finishes in single-digit seconds even at 1M.
-	console.log(`  resolving story_root for ${fmtCount(comments.length)} comments ...`);
-	const tResolve = performance.now();
-	for (const c of comments) {
-		const id = Number(c.key);
-		c.value.story_root = findStoryRoot(id, itemMeta);
-	}
-	console.log(`    done in ${((performance.now() - tResolve) / 1000).toFixed(1)}s`);
-
-	// Free the meta map before the bulk-insert phase — it can be 50 MB+.
-	itemMeta.clear();
-
-	// Insert stories first, then comments. Order matters for ref integrity
-	// only on the read side; shard-db doesn't enforce it.
-	console.log(`  bulk-insert stories (${fmtCount(stories.length)}) ...`);
-	const tStories = performance.now();
-	await bulkInsertParallel(pool, 'stories', stories);
-	console.log(`    ${((performance.now() - tStories) / 1000).toFixed(1)}s`);
-
-	console.log(`  bulk-insert comments (${fmtCount(comments.length)}) ...`);
-	const tComments = performance.now();
-	await bulkInsertParallel(pool, 'comments', comments);
-	console.log(`    ${((performance.now() - tComments) / 1000).toFixed(1)}s`);
-
-	return { stories: stories.length, comments: comments.length, maxId };
+	return { stories: totalStories, comments: totalComments, maxId };
 }
 
 function findStoryRoot(commentId: number, items: Map<number, ItemMeta>): number {
