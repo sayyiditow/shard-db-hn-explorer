@@ -42,7 +42,19 @@ const ITEMS_URL = `${HF_BASE}/items.parquet`;
 const USERS_URL = `${HF_BASE}/users.parquet`;
 
 const BULK_TARGET = parseTarget(process.env.BULK_TARGET ?? '1000000');
-const BULK_CHUNK = 5000;             // rows per bulk-insert call
+
+/* Rows per bulk-insert call. At full-HN scale (44M items) the previous
+ * 5000-row chunks meant 8800 daemon round-trips for items alone, each
+ * paying parse + write + msync + tcp overhead. Daemon logs showed
+ * per-chunk timing 150-360ms — total ~30-40 min just in fixed
+ * per-call cost. Going to 100k cuts that to ~440 calls and amortises
+ * the overhead.
+ *
+ * Trade-off: each call holds more rows in the daemon's request buffer
+ * (~50 MB per call at 500 B/row). Bounded by MAX_REQUEST_SIZE in
+ * db.env (default 100MB) — we set it to 100MB on the Netcup deploy
+ * so this fits with headroom. */
+const BULK_CHUNK = 100_000;
 const PARALLEL_CONNS = 5;            // shard-db client pool size
 
 /* Items pipeline flushes stories + comments to shard-db every
