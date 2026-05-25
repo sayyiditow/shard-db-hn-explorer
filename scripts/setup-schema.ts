@@ -9,6 +9,7 @@
  */
 
 import { ShardDbClient, isError } from '../src/lib/shard-db/client';
+import { INDEX_LISTS } from './lib/hn-schema';
 
 const client = new ShardDbClient({
 	host: process.env.SHARD_DB_HOST ?? '127.0.0.1',
@@ -62,18 +63,9 @@ async function main() {
 		// title:trigram for substring search on /search; planner picks btree-leaf
 		// for short patterns and trigram for longer (>= 6 chars). dead/deleted
 		// auto-bitmap by being bool fields. type auto-bitmap by being enum.
-		indexes: [
-			'by',
-			'time',
-			'score',
-			'type',
-			'dead',
-			'deleted',
-			'title:trigram',
-			'by+time',
-			'time+score',
-			'type+time'
-		]
+		// Index list comes from scripts/lib/hn-schema.ts — single source of
+		// truth shared with bulk-load.ts's load-then-index pattern.
+		indexes: INDEX_LISTS.stories
 	});
 
 	await step('comments', {
@@ -95,16 +87,7 @@ async function main() {
 		// would exceed 100 GB. Comment search is "comments by X" (by:btree)
 		// or "comments on story Y" (story_root:btree); full-text comment
 		// search is out of scope for shard-db's positioning.
-		indexes: [
-			'by',
-			'time',
-			'parent',
-			'story_root',
-			'dead',
-			'deleted',
-			'by+time',
-			'story_root+time'
-		]
+		indexes: INDEX_LISTS.comments
 	});
 
 	await step('users', {
@@ -119,7 +102,7 @@ async function main() {
 			'about:varchar:1024',                               // most HN bios are short; longer get truncated with "..."
 			'submitted_count:int'
 		],
-		indexes: ['karma', 'created']
+		indexes: INDEX_LISTS.users
 	});
 
 	console.log('\nSchema ready.');
