@@ -138,11 +138,31 @@ export async function tick(deps: TickDeps = {}): Promise<TickResult> {
 	}
 
 	let storiesInserted = 0, commentsInserted = 0, usersInserted = 0;
+	/* Tick processes at most MAX_ITEMS_PER_TICK ids — see refresh-cache
+	   header for the rationale. With a stale parquet snapshot the
+	   delta to "now" can be millions of items; without this cap the
+	   first post-bulk-load tick tries to fetch all of them at
+	   concurrency=16, hits HN Firebase rate limits, fails, and makes
+	   no progress on the next tick either. Cap means each tick makes
+	   bounded progress; backfill catches up over multiple ticks. */
+	const MAX_ITEMS_PER_TICK = 10_000;
+	/* The id we'll persist to state at the end of this tick. Starts at
+	   effectiveLastSeen and advances when we successfully process. */
+	let endOfTickId = effectiveLastSeen;
 
 	if (maxItem > effectiveLastSeen) {
+		const pending = maxItem - effectiveLastSeen;
+		const thisTickEnd = Math.min(effectiveLastSeen + MAX_ITEMS_PER_TICK, maxItem);
 		const ids: number[] = [];
-		for (let i = effectiveLastSeen + 1; i <= maxItem; i++) ids.push(i);
+		for (let i = effectiveLastSeen + 1; i <= thisTickEnd; i++) ids.push(i);
+		endOfTickId = thisTickEnd;
 
+		if (pending > MAX_ITEMS_PER_TICK) {
+			logInfo(
+				`catch-up: ${pending} items pending, processing ${ids.length} this tick ` +
+				`(remaining after this tick: ${pending - ids.length})`
+			);
+		}
 		logInfo(`fetching ${ids.length} items from HN (concurrency=16)...`);
 		const tFetch = Date.now();
 		const items = await api.getItemsConcurrent(ids, 16);
@@ -241,7 +261,11 @@ export async function tick(deps: TickDeps = {}): Promise<TickResult> {
 			return emptyResult(lastSeen, (e as Error).message);
 		}
 
-		await state.write(maxItem);
+		/* Persist endOfTickId (not maxItem). When MAX_ITEMS_PER_TICK
+		   caps the tick, endOfTickId is the last id WE processed —
+		   next tick continues from endOfTickId+1. Persisting maxItem
+		   here would skip the unprocessed gap. */
+		await state.write(endOfTickId);
 	}
 
 	const total = storiesInserted + commentsInserted + usersInserted;
