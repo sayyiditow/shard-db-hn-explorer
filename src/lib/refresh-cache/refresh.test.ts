@@ -124,6 +124,36 @@ describe('refresh tick', () => {
         expect(cache.stats().size).toBeGreaterThan(0);
     });
 
+    test('large delta is capped to MAX_ITEMS_PER_TICK; state advances by cap, not maxItem', async () => {
+        /* Stale bulk-load snapshot scenario: state at 1000, HN at 1,000,100
+           (1M+ gap). Without the cap a single tick tries to fetch 1M items
+           via HN Firebase, rate-limits, fails, and the next tick repeats.
+           With the cap: tick processes 10k ids, advances state by 10k,
+           remaining gap drains over future ticks. */
+        await write(1000);
+        const { deps } = makeDeps({
+            getMaxItem: async () => 1_001_000,
+            // Mock returns no real items — we're only checking the cap +
+            // state-advance behaviour, not the per-item processing.
+            items: []
+        });
+        await tick(deps);
+        // MAX_ITEMS_PER_TICK = 10_000; lastSeen advances 1000 → 11_000
+        expect(await read()).toBe(11_000);
+    });
+
+    test('small delta below MAX_ITEMS_PER_TICK advances state to maxItem', async () => {
+        // Normal steady-state case — make sure the cap doesn't artificially
+        // hold back state when the actual gap is smaller than the cap.
+        await write(100);
+        const { deps } = makeDeps({
+            getMaxItem: async () => 105,
+            items: []
+        });
+        await tick(deps);
+        expect(await read()).toBe(105);
+    });
+
     test('idle tick with populated cache leaves cache unchanged', async () => {
         // Seed the cache with a sentinel marker we can detect afterwards.
         cache.swap(new Map([['sentinel', { result: 'untouched', mtime: 1 }]]));
