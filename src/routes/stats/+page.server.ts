@@ -46,14 +46,19 @@ async function timed<T>(query: Record<string, unknown>): Promise<Panel<T>> {
 }
 
 export const load: PageServerLoad = async () => {
-	// Six panels fired in parallel. Each is a single round-trip to shard-db,
-	// so end-to-end wall time = max(panel ms) + connection overhead.
+	/* Top commenters panel disabled for the full-HN launch (2026-05-25).
+	   Single-field group_by on 38.5M comments by 'by' builds a hashmap
+	   of ~5M unique commenters (~350 MB) and busts QUERY_BUFFER_MB. See
+	   backlog-indexed-groupby-topn-streaming for the server-side fix
+	   (btree-walk + top-N heap, bounded memory). Re-enable when shipped,
+	   or pre-compute via refresh-cache once that's wired for /stats. */
+
+	// Five panels fired in parallel. Each is a single round-trip to shard-db.
 	const [
 		storyCount,
 		commentCount,
 		userCount,
 		topStoryAuthors,
-		topCommenters,
 		topUsers
 	] = await Promise.all([
 		timed<number>({ mode: 'count', dir: 'hn', object: 'stories' }),
@@ -78,16 +83,6 @@ export const load: PageServerLoad = async () => {
 			order: 'desc',
 			limit: 20
 		}),
-		timed<AggRow[]>({
-			mode: 'aggregate',
-			dir: 'hn',
-			object: 'comments',
-			group_by: ['by'],
-			aggregates: [{ fn: 'count', alias: 'comments' }],
-			order_by: 'comments',
-			order: 'desc',
-			limit: 20
-		}),
 		timed<Record<string, Record<string, unknown>>>({
 			mode: 'find',
 			dir: 'hn',
@@ -100,6 +95,13 @@ export const load: PageServerLoad = async () => {
 			format: 'dict'
 		})
 	]);
+
+	const topCommenters: Panel<AggRow[]> = {
+		query: { _disabled: 'top-commenters-disabled-pending-server-fix' },
+		ms: 0,
+		data: [],
+		error: 'panel disabled: see backlog-indexed-groupby-topn-streaming'
+	};
 
 	// Flatten dict-form into UserRow[] + coerce numeric strings.
 	const topUsersRows: UserRow[] = topUsers.error
@@ -123,7 +125,7 @@ export const load: PageServerLoad = async () => {
 		(storyCount.data ?? 0) + (commentCount.data ?? 0) + (userCount.data ?? 0);
 	const totalMs =
 		storyCount.ms + commentCount.ms + userCount.ms +
-		topStoryAuthors.ms + topCommenters.ms + topUsers.ms +
+		topStoryAuthors.ms + topUsers.ms +
 		storiesSchema.ms + commentsSchema.ms + usersSchema.ms;
 
 	return {
