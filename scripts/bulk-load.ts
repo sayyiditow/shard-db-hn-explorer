@@ -91,9 +91,29 @@ interface UserRow {
 	submitted?: (bigint | number)[];
 }
 
-interface ItemMeta {
-	type: string;
-	parent: number;
+/* Item type codes for the compact typed-array itemMeta replacement.
+ * Mapping a string type to a uint8 keeps the parent-chain walker
+ * branch-free on the type check. 0 = unknown / out-of-slice. */
+const TYPE_UNKNOWN = 0;
+const TYPE_STORY   = 1;
+const TYPE_COMMENT = 2;
+const TYPE_JOB     = 3;
+const TYPE_POLL    = 4;
+const TYPE_POLLOPT = 5;
+
+function typeCode(t: string | undefined): number {
+	switch (t) {
+		case 'story':   return TYPE_STORY;
+		case 'comment': return TYPE_COMMENT;
+		case 'job':     return TYPE_JOB;
+		case 'poll':    return TYPE_POLL;
+		case 'pollopt': return TYPE_POLLOPT;
+		default:        return TYPE_UNKNOWN;
+	}
+}
+
+function isStoryLike(code: number): boolean {
+	return code === TYPE_STORY || code === TYPE_JOB || code === TYPE_POLL;
 }
 
 function parseTarget(s: string): number {
@@ -295,14 +315,38 @@ async function loadItems(pool: ShardDbClient[]): Promise<{ stories: number; comm
 	const ROW_GROUP_HINT = Math.ceil(totalRows / rowGroups); // approx rows per group
 	console.log(`  target: ${fmtCount(targetRows)} items (≈${rowGroups > 0 ? Math.ceil(targetRows / ROW_GROUP_HINT) : 0} row groups)`);
 
-	/* itemMeta is needed for story_root resolution across the WHOLE
-	   dataset (a comment's parent may have been in any earlier row
-	   group). HN's parquet is sorted ascending by id, and parent ids
-	   are always lower than child ids, so by the time we see a
-	   comment, its parent is already in itemMeta — resolution can
-	   happen inline. itemMeta grows monotonically (~3 GB at 44M
-	   items) but that's bounded by the dataset; not the OOM trigger. */
-	const itemMeta = new Map<number, ItemMeta>();
+	/* Item-meta storage: id → (type, parent), needed for resolving
+	   comment story_root across the WHOLE dataset (a comment's parent
+	   may have come from any earlier row group). HN's parquet is sorted
+	   ascending by id and parents always have lower ids than children,
+	   so by the time we see a comment its parent chain is already in
+	   the arrays — resolution can happen inline.
+
+	   Pre-2026-05-25 used Map<number, {type, parent}> which OOM'd at
+	   ~56% (25M items). V8 Map entries are ~120 B each so 44M items
+	   pushed the JS heap past V8's default 4 GB cap. Typed arrays live
+	   OFF the V8 heap (raw backing buffers), so the cap doesn't apply
+	   AND they're 12× smaller per entry. */
+	const arraySize = totalRows + 1_000_000;  // headroom for any id gaps
+	console.log(`  allocating itemMeta typed arrays (${fmtCount(arraySize)} slots, ~${((arraySize * 5) / 1e6).toFixed(0)} MB)...`);
+	const itemType = new Uint8Array(arraySize);    // 1 B per id
+	const itemParent = new Uint32Array(arraySize); // 4 B per id
+
+	/* findStoryRoot — walks the parent chain to the top-level story id.
+	   Closure so it hot-accesses local typed arrays without param plumbing. */
+	const findStoryRoot = (commentId: number): number => {
+		if (commentId >= arraySize || itemType[commentId] === TYPE_UNKNOWN) return commentId;
+		let parent = itemParent[commentId];
+		// HN comment chains are typically ≤ 20 deep; 64 is the safety belt.
+		for (let i = 0; i < 64; i++) {
+			if (parent === 0) break;
+			if (parent >= arraySize) return parent;
+			if (itemType[parent] === TYPE_UNKNOWN) return parent;
+			if (isStoryLike(itemType[parent])) return parent;
+			parent = itemParent[parent];
+		}
+		return parent || commentId;
+	};
 
 	/* Batch arrays are flushed every FLUSH_EVERY_ITEMS rows read so
 	   peak Bun heap from these stays bounded (~500 MB at the 1M
@@ -344,11 +388,15 @@ async function loadItems(pool: ShardDbClient[]): Promise<{ stories: number; comm
 			rowEnd
 		})) as unknown as ItemRow[];
 
-		// Build parent-resolution map for THIS row group's ids; later
+		// Build parent-resolution arrays for THIS row group's ids; later
 		// rows in the same group may reference earlier rows in the
 		// group, so populate the whole group before classifying.
 		for (const r of rows) {
-			itemMeta.set(n(r.id), { type: r.type ?? 'unknown', parent: n(r.parent) });
+			const id = n(r.id);
+			if (id < arraySize) {
+				itemType[id] = typeCode(r.type);
+				itemParent[id] = n(r.parent);
+			}
 		}
 
 		for (const r of rows) {
@@ -376,15 +424,15 @@ async function loadItems(pool: ShardDbClient[]): Promise<{ stories: number; comm
 				});
 			} else if (r.type === 'comment') {
 				// Resolve story_root inline — parquet is sorted by id
-				// ascending and parents have lower ids, so itemMeta
-				// already contains the parent chain.
+				// ascending and parents have lower ids, so the typed
+				// arrays already contain the parent chain.
 				comments.push({
 					key: idStr,
 					value: {
 						by: r.by ?? '',
 						time: toMs(r.time),
 						parent: n(r.parent),
-						story_root: findStoryRoot(id, itemMeta),
+						story_root: findStoryRoot(id),
 						text: truncateBytes(r.text ?? '', MAX_COMMENT_TEXT),
 						deleted: !!r.deleted,
 						dead: !!r.dead
