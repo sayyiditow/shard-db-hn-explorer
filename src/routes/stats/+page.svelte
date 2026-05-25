@@ -106,6 +106,12 @@
 		{/if}
 	</QueryPanel>
 
+	<!-- Top commenters panel disabled for the full-HN launch.
+	     38.5M comments × ~5M unique commenters bust QUERY_BUFFER_MB
+	     on the single-field group_by hashmap path. Server-side fix:
+	     backlog-indexed-groupby-topn-streaming (btree-walk + top-N
+	     heap). Re-enable when shipped, or pre-compute in refresh-cache. -->
+	<!--
 	<QueryPanel
 		title="Top commenters"
 		ms={data.topCommenters.ms}
@@ -128,6 +134,7 @@
 			</ol>
 		{/if}
 	</QueryPanel>
+	-->
 
 	<QueryPanel
 		title="Top users by karma"
