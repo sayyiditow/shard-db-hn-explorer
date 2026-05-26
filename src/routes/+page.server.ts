@@ -1,5 +1,5 @@
-import { shardDb, isError } from '$lib/shard-db/client';
-import { getCached, canonicalKey, windowAnchor } from '$lib/refresh-cache';
+import { isError } from '$lib/shard-db/client';
+import { cachedQuery, windowAnchor } from '$lib/refresh-cache';
 import type { Story, Comment } from '$lib/hn/types';
 import type { PageServerLoad } from './$types';
 
@@ -42,14 +42,8 @@ const SORT_FIELDS: Record<Sort, string> = {
  *  active without slipping into bygone-classics territory. */
 const HOT_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 
-/** Cache-then-fallthrough: returns the cached result if present,
- *  otherwise issues the live query.  Read-only — never populates
- *  the cache (that's the refresh re-warm's job). */
-async function cachedQuery<T>(payload: Record<string, unknown>): Promise<T | { error: string }> {
-	const hit = getCached(canonicalKey(payload));
-	if (hit !== null) return hit as T;
-	return shardDb.query<T>(payload);
-}
+/* cachedQuery now lives in $lib/refresh-cache — get-or-fetch-and-store,
+ *  so the first visitor's live query populates the cache for the next. */
 
 /** Category combines `type` (enum bitmap) with optional title prefix
  *  to surface HN's signature derived categories (Ask HN, Show HN).
