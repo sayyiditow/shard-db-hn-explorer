@@ -47,20 +47,24 @@ async function timed<T>(query: Record<string, unknown>): Promise<Panel<T>> {
 }
 
 export const load: PageServerLoad = async () => {
-	/* Top story authors + Top commenters re-enabled (2026-05-26): shard-db's
-	   server-side streaming top-N aggregate (Phase 1) walks the 'by' btree in
-	   value order with a bounded K-element heap, so the single-field count()
-	   group_by no longer busts QUERY_BUFFER_MB. Both panels are count-only —
-	   sum(score) per author (a different field) isn't streaming-eligible yet,
-	   so total_score returns with the composite-index rework. */
+	/* Top story authors re-enabled (2026-05-26): shard-db's server-side
+	   streaming top-N aggregate (Phase 1) walks the 'by' btree with a bounded
+	   K-element heap, so the single-field count() group_by no longer busts
+	   QUERY_BUFFER_MB. Count-only — sum(score) per author (a different field)
+	   isn't streaming-eligible yet, so total_score waits on the composite rework.
 
-	// Six panels fired in parallel. Each is a single round-trip to shard-db.
+	   Top commenters stays DISABLED: comments is 38.5M rows, and the streaming
+	   walk is bounded-memory but still O(N) — cold it exceeds the 30s server
+	   timeout, and since failed queries don't cache it never recovers (stays
+	   red). Re-enable once the 38.5M top-N is viable: parallelize the per-shard
+	   walk, or background pre-warm with a high timeout_ms. See backlog. */
+
+	// Five panels fired in parallel. Each is a single round-trip to shard-db.
 	const [
 		storyCount,
 		commentCount,
 		userCount,
 		topStoryAuthors,
-		topCommenters,
 		topUsers
 	] = await Promise.all([
 		timed<number>({ mode: 'count', dir: 'hn', object: 'stories' }),
@@ -79,16 +83,6 @@ export const load: PageServerLoad = async () => {
 			order: 'desc',
 			limit: 20
 		}),
-		timed<AggRow[]>({
-			mode: 'aggregate',
-			dir: 'hn',
-			object: 'comments',
-			group_by: ['by'],
-			aggregates: [{ fn: 'count', alias: 'comments' }],
-			order_by: 'comments',
-			order: 'desc',
-			limit: 20
-		}),
 		timed<Record<string, Record<string, unknown>>>({
 			mode: 'find',
 			dir: 'hn',
@@ -101,6 +95,13 @@ export const load: PageServerLoad = async () => {
 			format: 'dict'
 		})
 	]);
+
+	const topCommenters: Panel<AggRow[]> = {
+		query: { _disabled: 'top-commenters-disabled-38M-streaming-timeout' },
+		ms: 0,
+		data: [],
+		error: 'panel disabled: 38.5M streaming top-N exceeds timeout cold (see backlog)'
+	};
 
 	// Flatten dict-form into UserRow[] + coerce numeric strings.
 	const topUsersRows: UserRow[] = topUsers.error
