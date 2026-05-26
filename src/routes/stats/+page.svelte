@@ -105,6 +105,11 @@
 		{/if}
 	</QueryPanel>
 
+	<!-- Top commenters panel disabled again (2026-05-26): comments is 38.5M
+	     rows; the streaming top-N count is bounded-memory but O(N) and exceeds
+	     the 30s timeout cold, so it never caches and stays red. Re-enable once
+	     the 38.5M top-N is viable (parallelize the per-shard walk, or background
+	     pre-warm with a high timeout_ms). Top story authors (5.6M) stays on.
 	<QueryPanel
 		title="Top commenters"
 		ms={data.topCommenters.ms}
@@ -127,6 +132,7 @@
 			</ol>
 		{/if}
 	</QueryPanel>
+	-->
 
 	<QueryPanel
 		title="Top users by karma"
