@@ -224,32 +224,32 @@ export function* enumerateKeys(referenceNowMs: number = Date.now()): Generator<C
     // expensive (group_by + sort), perfect cache candidates.  Same
     // shape every page load → cache key is deterministic.
     const statsQueries: Record<string, unknown>[] = [
-        // Top story authors (group_by author, sum scores)
+        // Top story authors (group_by author, count).
+        // MUST match the /stats page query shape EXACTLY — the cache key is
+        // derived from the query, so any drift = permanent cache miss and the
+        // page pays full cost. Two deliberate choices here (2026-05-27):
+        //   - count-only, no sum(score): sum on a non-group field isn't
+        //     streaming-eligible → 20s scan fallback. Re-add with total_score
+        //     once the streaming agg covers composite-covered aggregates.
+        //   - no type=story criterion: a lone bitmap criterion makes the
+        //     streaming top-N abandon its ~600ms btree walk and full-scan
+        //     (~8.6s). type=story removes only 0.6% of rows (5.636M/5.671M) so
+        //     the top-20 is unchanged. Re-add once the engine post-filters
+        //     bitmap criteria per-record instead of falling back to scan.
         {
             mode: 'aggregate',
             dir: HN_DIR,
             object: 'stories',
             group_by: ['by'],
-            aggregates: [
-                { fn: 'count', alias: 'stories' },
-                { fn: 'sum', field: 'score', alias: 'total_score' }
-            ],
-            criteria: [{ field: 'type', op: 'eq', value: 'story' }],
+            aggregates: [{ fn: 'count', alias: 'stories' }],
             order_by: 'stories',
             order: 'desc',
             limit: 20
         },
-        // Top commenters (group_by author, count)
-        {
-            mode: 'aggregate',
-            dir: HN_DIR,
-            object: 'comments',
-            group_by: ['by'],
-            aggregates: [{ fn: 'count', alias: 'comments' }],
-            order_by: 'comments',
-            order: 'desc',
-            limit: 20
-        },
+        // Top commenters: NOT warmed. Panel is disabled (38.5M streaming
+        // top-N exceeds the 30s timeout cold), and warming it here stalled
+        // the whole sequential rewarm by 30s every cycle for a result nothing
+        // renders. Re-add alongside re-enabling the panel.
         // Top users (find by karma desc — no aggregate, just an ordered scan)
         {
             mode: 'find',
