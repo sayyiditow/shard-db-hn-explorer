@@ -47,43 +47,24 @@ async function timed<T>(query: Record<string, unknown>): Promise<Panel<T>> {
 }
 
 export const load: PageServerLoad = async () => {
-	/* Top commenters panel disabled for the full-HN launch (2026-05-25).
-	   Single-field group_by on 38.5M comments by 'by' builds a hashmap
-	   of ~5M unique commenters (~350 MB) and busts QUERY_BUFFER_MB. See
-	   backlog-indexed-groupby-topn-streaming for the server-side fix
-	   (btree-walk + top-N heap, bounded memory). Re-enable when shipped,
-	   or pre-compute via refresh-cache once that's wired for /stats. */
+	/* Top commenters AND Top story authors panels disabled (2026-05-26).
+	   Both are single-field varchar group_by on the 'by' column: comments
+	   has ~5M unique commenters (~350 MB hashmap), stories has ~570k
+	   unique authors (smaller but still busts QUERY_BUFFER_MB on full-HN
+	   at 5.6M rows scanned). The proper fix is the streaming btree-walk +
+	   top-N heap aggregate path (see backlog-indexed-groupby-topn-streaming);
+	   re-enable both panels together after that ships. */
 
-	// Five panels fired in parallel. Each is a single round-trip to shard-db.
+	// Four panels fired in parallel. Each is a single round-trip to shard-db.
 	const [
 		storyCount,
 		commentCount,
 		userCount,
-		topStoryAuthors,
 		topUsers
 	] = await Promise.all([
 		timed<number>({ mode: 'count', dir: 'hn', object: 'stories' }),
 		timed<number>({ mode: 'count', dir: 'hn', object: 'comments' }),
 		timed<number>({ mode: 'count', dir: 'hn', object: 'users' }),
-		// Aggregates intentionally omit dead/deleted filters. Neither
-		// field is indexed on stories or comments, so adding them
-		// forces a full-scan (5.6s on 789k comments) vs the indexed
-		// group_by fast path (0.1s). Dead/deleted is <1% of HN traffic
-		// so the visible ranking is unchanged.
-		timed<AggRow[]>({
-			mode: 'aggregate',
-			dir: 'hn',
-			object: 'stories',
-			group_by: ['by'],
-			aggregates: [
-				{ fn: 'count', alias: 'stories' },
-				{ fn: 'sum', field: 'score', alias: 'total_score' }
-			],
-			criteria: [{ field: 'type', op: 'eq', value: 'story' }],
-			order_by: 'stories',
-			order: 'desc',
-			limit: 20
-		}),
 		timed<Record<string, Record<string, unknown>>>({
 			mode: 'find',
 			dir: 'hn',
@@ -97,6 +78,12 @@ export const load: PageServerLoad = async () => {
 		})
 	]);
 
+	const topStoryAuthors: Panel<AggRow[]> = {
+		query: { _disabled: 'top-story-authors-disabled-pending-server-fix' },
+		ms: 0,
+		data: [],
+		error: 'panel disabled: see backlog-indexed-groupby-topn-streaming'
+	};
 	const topCommenters: Panel<AggRow[]> = {
 		query: { _disabled: 'top-commenters-disabled-pending-server-fix' },
 		ms: 0,
@@ -126,7 +113,7 @@ export const load: PageServerLoad = async () => {
 		(storyCount.data ?? 0) + (commentCount.data ?? 0) + (userCount.data ?? 0);
 	const totalMs =
 		storyCount.ms + commentCount.ms + userCount.ms +
-		topStoryAuthors.ms + topUsers.ms +
+		topUsers.ms +
 		storiesSchema.ms + commentsSchema.ms + usersSchema.ms;
 
 	return {
