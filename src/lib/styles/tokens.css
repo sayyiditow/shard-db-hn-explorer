@@ -14,6 +14,7 @@
 	--c-link: #0a58ca;
 	--c-link-hover: #074db5;
 	--c-good: #1e8a3c;
+	--c-mid: #c2740a;
 	--c-warn: #c0392b;
 
 	/* Type */
@@ -81,6 +82,7 @@
 	--c-link: #6ea8fe;
 	--c-link-hover: #8db5ff;
 	--c-good: #4ade80;
+	--c-mid: #fbbf24;
 	--c-warn: #f87171;
 }
 
@@ -97,6 +99,7 @@
 	--c-link: #0a58ca;
 	--c-link-hover: #074db5;
 	--c-good: #1e8a3c;
+	--c-mid: #c2740a;
 	--c-warn: #c0392b;
 }
 
