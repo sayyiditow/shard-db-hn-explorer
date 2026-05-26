@@ -6,24 +6,23 @@
     <TimingBadge ms={data.queryMs} />
     <TimingBadge ms={data.queryMs} label="search" />
 
-  Colour cue:
-    <  10ms  → green   (in shard-db's hot path)
-    < 100ms  → black   (warm cache, indexed)
-    < 500ms  → muted   (cold or full-scan)
-    > 500ms  → warn    (slow — possible regression)
+  Colour cue (red reserved for genuinely slow queries):
+    <   10ms  → fast    (vivid green — shard-db hot path)
+    <  1000ms  → good    (green)
+    1000–2000ms → mid    (orange)
+    >  2000ms  → bad     (red)
+  Thresholds live in ./timing-badge.ts (badgeTone) and are unit-tested.
 -->
 <script lang="ts">
+	import { badgeTone } from './timing-badge';
+
 	interface Props {
 		ms: number;
 		label?: string;
 	}
 	let { ms, label }: Props = $props();
 
-	let tone = $derived(
-		ms < 10 ? 'fast' :
-		ms < 100 ? 'normal' :
-		ms < 500 ? 'slow' : 'warn'
-	);
+	let tone = $derived(badgeTone(ms));
 
 	let display = $derived(
 		ms < 1   ? ms.toFixed(2) + ' ms' :
@@ -58,7 +57,7 @@
 
 	.badge.fast .num { color: var(--c-good); }
 	.badge.fast .bracket { color: var(--c-good); opacity: 0.5; }
-	.badge.normal .num { color: var(--c-text); }
-	.badge.slow .num { color: var(--c-text-muted); }
-	.badge.warn .num { color: var(--c-warn); }
+	.badge.good .num { color: var(--c-good); }
+	.badge.mid .num { color: var(--c-mid); }
+	.badge.bad .num { color: var(--c-warn); }
 </style>
