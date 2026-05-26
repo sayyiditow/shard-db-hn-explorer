@@ -47,24 +47,48 @@ async function timed<T>(query: Record<string, unknown>): Promise<Panel<T>> {
 }
 
 export const load: PageServerLoad = async () => {
-	/* Top commenters AND Top story authors panels disabled (2026-05-26).
-	   Both are single-field varchar group_by on the 'by' column: comments
-	   has ~5M unique commenters (~350 MB hashmap), stories has ~570k
-	   unique authors (smaller but still busts QUERY_BUFFER_MB on full-HN
-	   at 5.6M rows scanned). The proper fix is the streaming btree-walk +
-	   top-N heap aggregate path (see backlog-indexed-groupby-topn-streaming);
-	   re-enable both panels together after that ships. */
+	/* Top story authors + Top commenters re-enabled (2026-05-26): shard-db's
+	   server-side streaming top-N aggregate (Phase 1) walks the 'by' btree in
+	   value order with a bounded K-element heap, so the single-field count()
+	   group_by no longer busts QUERY_BUFFER_MB. Both panels are count-only —
+	   sum(score) per author (a different field) isn't streaming-eligible yet,
+	   so total_score returns with the composite-index rework. */
 
-	// Four panels fired in parallel. Each is a single round-trip to shard-db.
+	// Six panels fired in parallel. Each is a single round-trip to shard-db.
 	const [
 		storyCount,
 		commentCount,
 		userCount,
+		topStoryAuthors,
+		topCommenters,
 		topUsers
 	] = await Promise.all([
 		timed<number>({ mode: 'count', dir: 'hn', object: 'stories' }),
 		timed<number>({ mode: 'count', dir: 'hn', object: 'comments' }),
 		timed<number>({ mode: 'count', dir: 'hn', object: 'users' }),
+		// Streaming top-N: group_by 'by' (btree) + count, ordered by the count
+		// alias with a limit → bounded-memory btree walk on the server.
+		timed<AggRow[]>({
+			mode: 'aggregate',
+			dir: 'hn',
+			object: 'stories',
+			group_by: ['by'],
+			aggregates: [{ fn: 'count', alias: 'stories' }],
+			criteria: [{ field: 'type', op: 'eq', value: 'story' }],
+			order_by: 'stories',
+			order: 'desc',
+			limit: 20
+		}),
+		timed<AggRow[]>({
+			mode: 'aggregate',
+			dir: 'hn',
+			object: 'comments',
+			group_by: ['by'],
+			aggregates: [{ fn: 'count', alias: 'comments' }],
+			order_by: 'comments',
+			order: 'desc',
+			limit: 20
+		}),
 		timed<Record<string, Record<string, unknown>>>({
 			mode: 'find',
 			dir: 'hn',
@@ -77,19 +101,6 @@ export const load: PageServerLoad = async () => {
 			format: 'dict'
 		})
 	]);
-
-	const topStoryAuthors: Panel<AggRow[]> = {
-		query: { _disabled: 'top-story-authors-disabled-pending-server-fix' },
-		ms: 0,
-		data: [],
-		error: 'panel disabled: see backlog-indexed-groupby-topn-streaming'
-	};
-	const topCommenters: Panel<AggRow[]> = {
-		query: { _disabled: 'top-commenters-disabled-pending-server-fix' },
-		ms: 0,
-		data: [],
-		error: 'panel disabled: see backlog-indexed-groupby-topn-streaming'
-	};
 
 	// Flatten dict-form into UserRow[] + coerce numeric strings.
 	const topUsersRows: UserRow[] = topUsers.error
@@ -113,7 +124,7 @@ export const load: PageServerLoad = async () => {
 		(storyCount.data ?? 0) + (commentCount.data ?? 0) + (userCount.data ?? 0);
 	const totalMs =
 		storyCount.ms + commentCount.ms + userCount.ms +
-		topUsers.ms +
+		topStoryAuthors.ms + topCommenters.ms + topUsers.ms +
 		storiesSchema.ms + commentsSchema.ms + usersSchema.ms;
 
 	return {
