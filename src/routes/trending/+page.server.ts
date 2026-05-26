@@ -1,14 +1,7 @@
-import { shardDb, isError } from '$lib/shard-db/client';
-import { getCached, canonicalKey, windowAnchor } from '$lib/refresh-cache';
+import { isError } from '$lib/shard-db/client';
+import { cachedQuery, windowAnchor } from '$lib/refresh-cache';
 import type { Story } from '$lib/hn/types';
 import type { PageServerLoad } from './$types';
-
-/** Cache-then-fallthrough — same shape as +page.server.ts. */
-async function cachedQuery<T>(payload: Record<string, unknown>): Promise<T | { error: string }> {
-	const hit = getCached(canonicalKey(payload));
-	if (hit !== null) return hit as T;
-	return shardDb.query<T>(payload);
-}
 
 /** Lookback windows the user can switch between via ?window=. */
 type Window = '1h' | '24h' | '7d' | 'all';
