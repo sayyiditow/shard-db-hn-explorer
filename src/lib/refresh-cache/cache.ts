@@ -39,6 +39,17 @@ export function get(key: string): unknown | null {
     return e ? e.result : null;
 }
 
+/** Write-through on cache miss — first visitor pays, everyone else hits.
+ *  The 5-min refresh swap() replaces the whole map so these mid-tick
+ *  writes naturally age out; no separate eviction needed.  Bounded by
+ *  MAX_ENTRIES to defend against query-shape explosion (e.g. /search
+ *  with arbitrary text, /u/<random>) within a single tick. */
+const MAX_ENTRIES = 8192;
+export function set(key: string, result: unknown): void {
+    if (state.map.size >= MAX_ENTRIES && !state.map.has(key)) return;
+    state.map.set(key, { result, mtime: Date.now() });
+}
+
 export function swap(newMap: Map<string, Entry>): void {
     state.map = newMap;
     state.lastSwapAt = Date.now();
