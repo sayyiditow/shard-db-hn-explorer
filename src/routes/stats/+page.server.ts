@@ -78,7 +78,12 @@ export const load: PageServerLoad = async () => {
 			object: 'stories',
 			group_by: ['by'],
 			aggregates: [{ fn: 'count', alias: 'stories' }],
-			criteria: [{ field: 'type', op: 'eq', value: 'story' }],
+			// type=story criterion dropped (2026-05-27): a lone bitmap criterion
+			// makes the streaming top-N abandon its ~600ms btree walk and
+			// full-scan (~8.6s); it removes only 0.6% of rows so the top-20 is
+			// unchanged. MUST stay identical to the refresh-cache warm key
+			// (lib/refresh-cache/keys.ts) or the page permanently cache-misses.
+			// Re-add once shard-db post-filters bitmap criteria per-record.
 			order_by: 'stories',
 			order: 'desc',
 			limit: 20
