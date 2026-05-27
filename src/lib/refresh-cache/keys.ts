@@ -224,24 +224,23 @@ export function* enumerateKeys(referenceNowMs: number = Date.now()): Generator<C
     // expensive (group_by + sort), perfect cache candidates.  Same
     // shape every page load → cache key is deterministic.
     const statsQueries: Record<string, unknown>[] = [
-        // Top story authors (group_by author, count).
+        // Top story authors (group_by author, count, type=story).
         // MUST match the /stats page query shape EXACTLY — the cache key is
         // derived from the query, so any drift = permanent cache miss and the
-        // page pays full cost. Two deliberate choices here (2026-05-27):
+        // page pays full cost.
         //   - count-only, no sum(score): sum on a non-group field isn't
         //     streaming-eligible → 20s scan fallback. Re-add with total_score
         //     once the streaming agg covers composite-covered aggregates.
-        //   - no type=story criterion: a lone bitmap criterion makes the
-        //     streaming top-N abandon its ~600ms btree walk and full-scan
-        //     (~8.6s). type=story removes only 0.6% of rows (5.636M/5.671M) so
-        //     the top-20 is unchanged. Re-add once the engine post-filters
-        //     bitmap criteria per-record instead of falling back to scan.
+        //   - type=story restored 2026-05-27: shard-db now post-filters the
+        //     lone bitmap criterion via the smaller-of-{match,complement}
+        //     keyset (~860ms warm) instead of full-scanning (~8.6s).
         {
             mode: 'aggregate',
             dir: HN_DIR,
             object: 'stories',
             group_by: ['by'],
             aggregates: [{ fn: 'count', alias: 'stories' }],
+            criteria: [{ field: 'type', op: 'eq', value: 'story' }],
             order_by: 'stories',
             order: 'desc',
             limit: 20
