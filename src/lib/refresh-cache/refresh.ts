@@ -16,6 +16,7 @@ import type { HnItem } from './hn-api';
 import * as cache from './cache';
 import { enumerateKeys } from './keys';
 import { truncateBytes } from './truncate';
+import { warmSlowStats } from './slow-stats';
 
 // Field byte-budgets mirror scripts/setup-schema.ts. Keep in sync:
 // shard-db rejects inserts with varchar content > N bytes, so we
@@ -280,8 +281,17 @@ export async function tick(deps: TickDeps = {}): Promise<TickResult> {
 }
 
 const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+/* Slow all-time stats (top commenters / top story authors) recompute on
+ * their own 1-hour cadence — they're whole-history rankings that don't move
+ * minute to minute, and the commenter walk is ~95s (far too slow for the
+ * 5-min tick). First warm is delayed so the main cache + first item tick get
+ * the cold-start window to themselves before we kick off the heavy scan. */
+const SLOW_STATS_INTERVAL_MS = 60 * 60 * 1000;
+const SLOW_STATS_FIRST_DELAY_MS = 20 * 1000;
 let g_started = false;
 let g_interval: ReturnType<typeof setInterval> | null = null;
+let g_slowInterval: ReturnType<typeof setInterval> | null = null;
+let g_slowTimeout: ReturnType<typeof setTimeout> | null = null;
 
 /** Begin the refresh loop.  Idempotent — calling repeatedly is safe;
  *  only the first call schedules anything.  Run an immediate tick so
@@ -302,6 +312,13 @@ export function start(): void {
 		() => { void tick().catch((e) => logErr(`tick: ${(e as Error).message}`)); },
 		REFRESH_INTERVAL_MS
 	);
+
+	// Slow all-time stats: delayed first warm, then hourly.
+	const runSlow = () => { void warmSlowStats().catch((e) => logErr(`slow-stats: ${(e as Error).message}`)); };
+	g_slowTimeout = setTimeout(() => {
+		runSlow();
+		g_slowInterval = setInterval(runSlow, SLOW_STATS_INTERVAL_MS);
+	}, SLOW_STATS_FIRST_DELAY_MS);
 }
 
 /** Test-only — stops the interval so the process exits cleanly. */
@@ -309,6 +326,14 @@ export function stopForTesting(): void {
 	if (g_interval) {
 		clearInterval(g_interval);
 		g_interval = null;
+	}
+	if (g_slowTimeout) {
+		clearTimeout(g_slowTimeout);
+		g_slowTimeout = null;
+	}
+	if (g_slowInterval) {
+		clearInterval(g_slowInterval);
+		g_slowInterval = null;
 	}
 	g_started = false;
 }
@@ -323,7 +348,11 @@ export function stopForTesting(): void {
 if (import.meta.hot) {
 	import.meta.hot.dispose(() => {
 		if (g_interval) clearInterval(g_interval);
+		if (g_slowTimeout) clearTimeout(g_slowTimeout);
+		if (g_slowInterval) clearInterval(g_slowInterval);
 		g_interval = null;
+		g_slowTimeout = null;
+		g_slowInterval = null;
 		g_started = false;
 	});
 }

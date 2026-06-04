@@ -220,35 +220,15 @@ export function* enumerateKeys(referenceNowMs: number = Date.now()): Generator<C
         }
     }
 
-    // /stats panel aggregates — three stable queries (no URL params),
-    // expensive (group_by + sort), perfect cache candidates.  Same
-    // shape every page load → cache key is deterministic.
+    // /stats panel aggregates — stable queries (no URL params), perfect
+    // cache candidates.  Same shape every page load → deterministic key.
+    //
+    // NOTE: the all-time rankings (top story authors, top commenters) are
+    // deliberately NOT here. They're whole-history group_bys that don't move
+    // minute to minute; recomputing them on this 5-min tick is waste (and the
+    // commenter walk is ~95s). They live in slow-stats.ts on a 1-hour cadence
+    // and the /stats page reads them cache-only from there.
     const statsQueries: Record<string, unknown>[] = [
-        // Top story authors (group_by author, count, type=story).
-        // MUST match the /stats page query shape EXACTLY — the cache key is
-        // derived from the query, so any drift = permanent cache miss and the
-        // page pays full cost.
-        //   - count-only, no sum(score): sum on a non-group field isn't
-        //     streaming-eligible → 20s scan fallback. Re-add with total_score
-        //     once the streaming agg covers composite-covered aggregates.
-        //   - type=story restored 2026-05-27: shard-db now post-filters the
-        //     lone bitmap criterion via the smaller-of-{match,complement}
-        //     keyset (~860ms warm) instead of full-scanning (~8.6s).
-        {
-            mode: 'aggregate',
-            dir: HN_DIR,
-            object: 'stories',
-            group_by: ['by'],
-            aggregates: [{ fn: 'count', alias: 'stories' }],
-            criteria: [{ field: 'type', op: 'eq', value: 'story' }],
-            order_by: 'stories',
-            order: 'desc',
-            limit: 20
-        },
-        // Top commenters: NOT warmed. Panel is disabled (38.5M streaming
-        // top-N exceeds the 30s timeout cold), and warming it here stalled
-        // the whole sequential rewarm by 30s every cycle for a result nothing
-        // renders. Re-add alongside re-enabling the panel.
         // Top users (find by karma desc — no aggregate, just an ordered scan)
         {
             mode: 'find',

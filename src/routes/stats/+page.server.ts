@@ -1,5 +1,12 @@
 import { isError } from '$lib/shard-db/client';
-import { cachedQuery } from '$lib/refresh-cache';
+import {
+	cachedQuery,
+	getTopCommenters,
+	getTopStoryAuthors,
+	TOP_COMMENTERS_QUERY,
+	TOP_STORY_AUTHORS_QUERY,
+	type SlowEntry
+} from '$lib/refresh-cache';
 import type { PageServerLoad } from './$types';
 
 /** One panel = one shard-db query + the JSON we sent + the ms it took.
@@ -46,47 +53,38 @@ async function timed<T>(query: Record<string, unknown>): Promise<Panel<T>> {
 	return { query, ms, data: resp as T };
 }
 
+/** Project a slow-stats cache entry (top commenters / authors) into a Panel.
+ *  Cache-only: these are warmed hourly in the background (slow-stats.ts), never
+ *  fired live — a cold entry renders "computing…" instead of blocking the page
+ *  on a ~95s scan. */
+function slowPanel(
+	entry: SlowEntry,
+	query: Record<string, unknown>
+): Panel<AggRow[]> {
+	if (entry.data) return { query, ms: entry.ms, data: entry.data };
+	return {
+		query,
+		ms: 0,
+		data: [],
+		error: entry.error ?? 'computing… (warms hourly in the background)'
+	};
+}
+
 export const load: PageServerLoad = async () => {
-	/* Top story authors re-enabled (2026-05-26): shard-db's server-side
-	   streaming top-N aggregate (Phase 1) walks the 'by' btree with a bounded
-	   K-element heap, so the single-field count() group_by no longer busts
-	   QUERY_BUFFER_MB. Count-only — sum(score) per author (a different field)
-	   isn't streaming-eligible yet, so total_score waits on the composite rework.
+	/* All-time rankings (top story authors, top commenters) are served
+	   cache-only from slow-stats.ts — warmed hourly in the background. They're
+	   whole-history group_bys (5.6M stories, 38.5M comments); recomputing them
+	   on every page load (or the 5-min cache tick) is waste, and the commenter
+	   walk is ~95s, far too slow for a live request. The background warm uses a
+	   high timeout_ms; here we just read the last good result. */
+	const topStoryAuthors = slowPanel(getTopStoryAuthors(), TOP_STORY_AUTHORS_QUERY as Record<string, unknown>);
+	const topCommenters = slowPanel(getTopCommenters(), TOP_COMMENTERS_QUERY as Record<string, unknown>);
 
-	   Top commenters stays DISABLED: comments is 38.5M rows, and the streaming
-	   walk is bounded-memory but still O(N) — cold it exceeds the 30s server
-	   timeout, and since failed queries don't cache it never recovers (stays
-	   red). Re-enable once the 38.5M top-N is viable: parallelize the per-shard
-	   walk, or background pre-warm with a high timeout_ms. See backlog. */
-
-	// Five panels fired in parallel. Each is a single round-trip to shard-db.
-	const [
-		storyCount,
-		commentCount,
-		userCount,
-		topStoryAuthors,
-		topUsers
-	] = await Promise.all([
+	// Counts + top users fired in parallel. Each is a single round-trip.
+	const [storyCount, commentCount, userCount, topUsers] = await Promise.all([
 		timed<number>({ mode: 'count', dir: 'hn', object: 'stories' }),
 		timed<number>({ mode: 'count', dir: 'hn', object: 'comments' }),
 		timed<number>({ mode: 'count', dir: 'hn', object: 'users' }),
-		// Streaming top-N: group_by 'by' (btree) + count, ordered by the count
-		// alias with a limit → bounded-memory btree walk on the server.
-		timed<AggRow[]>({
-			mode: 'aggregate',
-			dir: 'hn',
-			object: 'stories',
-			group_by: ['by'],
-			aggregates: [{ fn: 'count', alias: 'stories' }],
-			// type=story restored 2026-05-27: shard-db now post-filters the lone
-			// bitmap criterion via smaller-of-{match,complement} (~860ms warm)
-			// instead of full-scanning. MUST stay identical to the refresh-cache
-			// warm key (lib/refresh-cache/keys.ts) or the page cache-misses.
-			criteria: [{ field: 'type', op: 'eq', value: 'story' }],
-			order_by: 'stories',
-			order: 'desc',
-			limit: 20
-		}),
 		timed<Record<string, Record<string, unknown>>>({
 			mode: 'find',
 			dir: 'hn',
@@ -99,13 +97,6 @@ export const load: PageServerLoad = async () => {
 			format: 'dict'
 		})
 	]);
-
-	const topCommenters: Panel<AggRow[]> = {
-		query: { _disabled: 'top-commenters-disabled-38M-streaming-timeout' },
-		ms: 0,
-		data: [],
-		error: 'panel disabled: 38.5M streaming top-N exceeds timeout cold (see backlog)'
-	};
 
 	// Flatten dict-form into UserRow[] + coerce numeric strings.
 	const topUsersRows: UserRow[] = topUsers.error

@@ -11,3 +11,11 @@ export { start } from './refresh';
 export { get as getCached, stats } from './cache';
 export { canonicalKey, windowAnchor } from './keys';
 export { cachedQuery } from './cached-query';
+export {
+	getTopCommenters,
+	getTopStoryAuthors,
+	TOP_COMMENTERS_QUERY,
+	TOP_STORY_AUTHORS_QUERY,
+	type AggRow as SlowAggRow,
+	type SlowEntry
+} from './slow-stats';
