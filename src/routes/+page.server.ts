@@ -126,8 +126,13 @@ export const load: PageServerLoad = async ({ url }) => {
 			// object is by definition a comment.
 			break;
 		default:
-			// Stories source, no explicit category — hide pollopts.
-			criteria.push({ field: 'type', op: 'in', value: 'story,job,poll' });
+			// No type filter. The stories object holds only story/job/poll
+			// (legacy pollopts were deleted from shard-db on 2026-06-04, and
+			// ingestion drops them). Omitting the old `type in (story,job,poll)`
+			// avoids the uncovered multi-value `in` that forced a full
+			// materialize-and-sort / unbounded walk on the homepage's
+			// score/time ordering — same result set, far faster.
+			break;
 	}
 
 	// Substring filter target depends on source: title for stories,
