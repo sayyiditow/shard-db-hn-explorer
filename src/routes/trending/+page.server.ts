@@ -3,40 +3,37 @@ import { cachedQuery, windowAnchor } from '$lib/refresh-cache';
 import type { Story } from '$lib/hn/types';
 import type { PageServerLoad } from './$types';
 
-/** Lookback windows the user can switch between via ?window=. */
-type Window = '1h' | '24h' | '7d' | 'all';
-const WINDOW_MS: Record<Window, number | null> = {
+/** Lookback windows the user can switch between via ?window=. No "all":
+ *  ranking the whole dataset by score with no time filter is the pathological
+ *  no-time-filter scan (count returns 4.3M but the ORDER BY score find can't
+ *  materialise it → top-0). Trending is a recency feature; windowed only. */
+type Window = '1h' | '24h' | '7d';
+const WINDOW_MS: Record<Window, number> = {
 	'1h': 60 * 60 * 1000,
 	'24h': 24 * 60 * 60 * 1000,
-	'7d': 7 * 24 * 60 * 60 * 1000,
-	'all': null
+	'7d': 7 * 24 * 60 * 60 * 1000
 };
 
 const TOP_STORIES_LIMIT = 30;
 
 export const load: PageServerLoad = async ({ url }) => {
 	const rawWin = url.searchParams.get('window') ?? '24h';
-	// `??` would clobber the intentional `null` we store for `all`
-	// (meaning "no upper bound") and silently turn All-time into
-	// Past-24h. Use an `in` check so a genuinely unknown ?window=
-	// value falls back to 24h while `all` keeps its null sentinel.
+	// `in` check so an unknown ?window= (including the retired `all`)
+	// falls back to 24h.
 	const win: Window = (rawWin in WINDOW_MS ? rawWin : '24h') as Window;
 	const windowMs = WINDOW_MS[win];
 
 	// Use windowAnchor so the route's time threshold matches the
-	// cache rewarm pass — same trick as +page.server.ts. `since` is
-	// also computed off the anchor for the display badge.
+	// cache rewarm pass — same trick as +page.server.ts.
 	const anchor = windowAnchor();
-	const since = windowMs == null ? 0 : anchor - windowMs;
+	const since = anchor - windowMs;
 
 	const baseCrit: object[] = [
 		{ field: 'type', op: 'eq', value: 'story' },
 		{ field: 'dead', op: 'eq', value: 'false' },
-		{ field: 'deleted', op: 'eq', value: 'false' }
+		{ field: 'deleted', op: 'eq', value: 'false' },
+		{ field: 'time', op: 'gte', value: since }
 	];
-	if (windowMs != null) {
-		baseCrit.push({ field: 'time', op: 'gte', value: since });
-	}
 
 	const t0 = performance.now();
 	const [topStoriesResp, totalCountResp] = await Promise.all([
