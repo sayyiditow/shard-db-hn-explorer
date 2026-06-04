@@ -56,15 +56,21 @@ async function timed<T>(query: Record<string, unknown>): Promise<Panel<T>> {
 /** Project a slow-stats cache entry (top commenters / authors) into a Panel.
  *  Cache-only: these are warmed hourly in the background (slow-stats.ts), never
  *  fired live — a cold entry renders "computing…" instead of blocking the page
- *  on a ~95s scan. */
+ *  on a ~95s scan.
+ *
+ *  `ms` is the cache-READ latency (≈0, green) — NOT the background warm
+ *  duration. The badge measures "how long did this page wait", and a cached
+ *  panel waits ~nothing; surfacing the 40s warm cost here just paints it red
+ *  for a result that loaded instantly. */
 function slowPanel(
 	entry: SlowEntry,
-	query: Record<string, unknown>
+	query: Record<string, unknown>,
+	readMs: number
 ): Panel<AggRow[]> {
-	if (entry.data) return { query, ms: entry.ms, data: entry.data };
+	if (entry.data) return { query, ms: readMs, data: entry.data };
 	return {
 		query,
-		ms: 0,
+		ms: readMs,
 		data: [],
 		error: entry.error ?? 'computing… (warms hourly in the background)'
 	};
@@ -77,8 +83,12 @@ export const load: PageServerLoad = async () => {
 	   on every page load (or the 5-min cache tick) is waste, and the commenter
 	   walk is ~95s, far too slow for a live request. The background warm uses a
 	   high timeout_ms; here we just read the last good result. */
-	const topStoryAuthors = slowPanel(getTopStoryAuthors(), TOP_STORY_AUTHORS_QUERY as Record<string, unknown>);
-	const topCommenters = slowPanel(getTopCommenters(), TOP_COMMENTERS_QUERY as Record<string, unknown>);
+	const tSlow = performance.now();
+	const authorsEntry = getTopStoryAuthors();
+	const commentersEntry = getTopCommenters();
+	const slowReadMs = performance.now() - tSlow;
+	const topStoryAuthors = slowPanel(authorsEntry, TOP_STORY_AUTHORS_QUERY as Record<string, unknown>, slowReadMs);
+	const topCommenters = slowPanel(commentersEntry, TOP_COMMENTERS_QUERY as Record<string, unknown>, slowReadMs);
 
 	// Counts + top users fired in parallel. Each is a single round-trip.
 	const [storyCount, commentCount, userCount, topUsers] = await Promise.all([

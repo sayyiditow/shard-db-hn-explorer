@@ -5,11 +5,14 @@
 
 	let { data }: { data: PageData } = $props();
 
+	// No "All time" window: ranking 4.3M stories by score with no time filter
+	// is the pathological no-time-filter scan — count returns the full set but
+	// the ORDER BY score find can't materialise it (top-0). Trending is a
+	// recency feature anyway; the windowed tabs are the useful ones.
 	const windows = [
 		{ value: '1h',  label: 'Past hour' },
 		{ value: '24h', label: 'Past 24 hours' },
-		{ value: '7d',  label: 'Past 7 days' },
-		{ value: 'all', label: 'All time' }
+		{ value: '7d',  label: 'Past 7 days' }
 	] as const;
 </script>
 

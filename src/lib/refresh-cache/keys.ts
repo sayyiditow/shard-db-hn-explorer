@@ -181,21 +181,21 @@ export function* enumerateKeys(referenceNowMs: number = Date.now()): Generator<C
     // computation lines up with the cache key.
     const trendingAnchor = windowAnchor(referenceNowMs);
     const TRENDING_LIMIT = 30;
-    const trendingWindows: Array<{ name: string; ms: number | null }> = [
+    // No 'all' window: the no-time-filter ORDER BY score find over the whole
+    // dataset can't materialise (top-0) and warming it is pure waste. Trending
+    // is windowed-only (mirror src/routes/trending/+page.server.ts).
+    const trendingWindows: Array<{ name: string; ms: number }> = [
         { name: '1h',  ms: 60 * 60 * 1000 },
         { name: '24h', ms: 24 * 60 * 60 * 1000 },
-        { name: '7d',  ms: 7  * 24 * 60 * 60 * 1000 },
-        { name: 'all', ms: null }
+        { name: '7d',  ms: 7  * 24 * 60 * 60 * 1000 }
     ];
     for (const win of trendingWindows) {
         const trCrit: object[] = [
             { field: 'type',    op: 'eq', value: 'story' },
             { field: 'dead',    op: 'eq', value: 'false' },
-            { field: 'deleted', op: 'eq', value: 'false' }
+            { field: 'deleted', op: 'eq', value: 'false' },
+            { field: 'time',    op: 'gte', value: trendingAnchor - win.ms }
         ];
-        if (win.ms != null) {
-            trCrit.push({ field: 'time', op: 'gte', value: trendingAnchor - win.ms });
-        }
         const trFind = {
             mode: 'find',
             dir: HN_DIR,
