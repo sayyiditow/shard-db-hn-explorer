@@ -22,7 +22,6 @@ export const INDEX_LISTS: Record<string, string[]> = {
 		'deleted',
 		'title:trigram',
 		'by+time',
-		'time+score',
 		'type+time'
 	],
 	comments: [

@@ -4,7 +4,10 @@ import { buildCommentTree, countNodes } from '$lib/hn/comment-tree';
 import type { Story, Comment } from '$lib/hn/types';
 import type { PageServerLoad } from './$types';
 
-const COMMENTS_PAGE_SIZE = 500;
+// Full-thread load: HN threads ~never exceed this. The single story_root=id
+// ORDER BY time query is already ~ms-to-sub-second; rendering is paginated
+// client-side (see +page.svelte). Cap is a safety bound for pathological threads.
+const MAX_THREAD_COMMENTS = 5000;
 const NEAR_CONTEXT = 50;
 
 export const load: PageServerLoad = async ({ params, url }) => {
@@ -89,7 +92,7 @@ export const load: PageServerLoad = async ({ params, url }) => {
 			criteria: [{ field: 'story_root', op: 'eq', value: idNum }],
 			order_by: 'time',
 			order: 'asc',
-			limit: COMMENTS_PAGE_SIZE
+			limit: MAX_THREAD_COMMENTS
 		});
 
 		if (isError(commentsResp)) {
@@ -113,6 +116,6 @@ export const load: PageServerLoad = async ({ params, url }) => {
 		storyMs,
 		commentsMs,
 		totalMs: storyMs + commentsMs,
-		hasMore: nearKey ? false : (comments.length === COMMENTS_PAGE_SIZE && totalNodes < (story.descendants ?? 0))
+		hasMore: nearKey ? false : (comments.length === MAX_THREAD_COMMENTS && totalNodes < (story.descendants ?? 0))
 	};
 };
