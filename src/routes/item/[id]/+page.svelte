@@ -11,7 +11,11 @@
 	let storyHasText = $derived(!!data.story.text);
 	let domain = $derived(domainOf(data.story.url));
 
+	const ROOTS_STEP = 25;
+	let visibleRoots = $state(ROOTS_STEP);
+
 	afterNavigate(() => {
+		visibleRoots = ROOTS_STEP;
 		const hash = page.url.hash;
 		if (!hash) return;
 		const id = hash.slice(1);
@@ -76,13 +80,18 @@
 		<p class="muted">No comments yet.</p>
 	{:else}
 		<div class="thread">
-			{#each data.comments as node (node.comment.key)}
+			{#each data.comments.slice(0, visibleRoots) as node (node.comment.key)}
 				<Comment {node} />
 			{/each}
 		</div>
+		{#if visibleRoots < data.comments.length}
+			<button class="load-more" onclick={() => (visibleRoots += ROOTS_STEP)}>
+				Load more comments ({(data.comments.length - visibleRoots).toLocaleString()} threads left)
+			</button>
+		{/if}
 		{#if data.hasMore}
 			<p class="more-note">
-				Showing the first batch of comments — pagination beyond this page is a Phase 3 follow-up.
+				Thread truncated — too large to display fully.
 			</p>
 		{/if}
 	{/if}
@@ -185,6 +194,18 @@
 		border-top: 0;
 		padding-top: 0;
 	}
+
+	.load-more {
+		margin: 1rem 0;
+		padding: 0.5rem 1rem;
+		font: inherit;
+		cursor: pointer;
+		background: transparent;
+		border: 1px solid var(--border, #444);
+		border-radius: 6px;
+		color: inherit;
+	}
+	.load-more:hover { background: var(--hover, rgba(255,255,255,0.05)); }
 
 	.more-note {
 		margin-top: var(--s-5);
