@@ -290,6 +290,13 @@ export function start(): void {
 	if (g_started) return;
 	g_started = true;
 
+	/* Warm the cache immediately, BEFORE the first tick's HN-item fetch+insert
+	 * phase. After a restart the in-memory cache is empty, so until something
+	 * fills it every request stampedes shard-db (combined with single-flight in
+	 * cachedQuery, this keeps the cold window tiny). The first tick re-warms
+	 * again with any freshly-fetched data; rewarmCache builds + swaps wholesale,
+	 * so the redundant early warm is harmless. */
+	void rewarmCache(defaultClient).catch((e) => logErr(`startup warm: ${(e as Error).message}`));
 	void tick().catch((e) => logErr(`initial tick: ${(e as Error).message}`));
 	g_interval = setInterval(
 		() => { void tick().catch((e) => logErr(`tick: ${(e as Error).message}`)); },
