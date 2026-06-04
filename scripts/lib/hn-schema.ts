@@ -22,7 +22,14 @@ export const INDEX_LISTS: Record<string, string[]> = {
 		'deleted',
 		'title:trigram',
 		'by+time',
-		'type+time'
+		'type+time',
+		// Mirror of type+time for popularity sort: covers `type=<v> ORDER BY
+		// score` (per-type popularity tabs) the same way type+time covers
+		// newest. Safe alongside the planner's selectivity guard, which keeps a
+		// selective time-window filter from being hijacked into a full
+		// score-walk. Does NOT cover the homepage `type in (...)` default — that
+		// needs the planner's order-walk-postfilter path (see shard-db plan).
+		'type+score'
 	],
 	comments: [
 		'by',
