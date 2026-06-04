@@ -6,7 +6,11 @@
 		<meta name="text-scale" content="scale" />
 		%sveltekit.head%
 	</head>
-	<body data-sveltekit-preload-data="hover">
+	<!-- "tap" not "hover": item/comment pages run uncached, expensive shard-db
+	     queries (full threads, before/after context). Hover-preloading a list of
+	     comment links fired all of them just on mouse-over, hammering shard-db
+	     with results nobody viewed. tap preloads on click-intent instead. -->
+	<body data-sveltekit-preload-data="tap">
 		<div style="display: contents">%sveltekit.body%</div>
 	</body>
 </html>
