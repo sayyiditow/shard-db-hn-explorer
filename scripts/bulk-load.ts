@@ -54,7 +54,7 @@ const BULK_TARGET = parseTarget(process.env.BULK_TARGET ?? '1000000');
  * (~50 MB per call at 500 B/row). Bounded by MAX_REQUEST_SIZE in
  * db.env (default 100MB) — we set it to 100MB on the Netcup deploy
  * so this fits with headroom. */
-const BULK_CHUNK = 100_000;
+const BULK_CHUNK = Number(process.env.BULK_CHUNK ?? 100_000);
 const PARALLEL_CONNS = 5;            // shard-db client pool size
 
 /* Items pipeline flushes stories + comments to shard-db every
