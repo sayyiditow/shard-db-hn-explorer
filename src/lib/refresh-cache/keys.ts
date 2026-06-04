@@ -101,7 +101,11 @@ function buildCriteria(
         case 'comment':
             break;
         default:
-            criteria.push({ field: 'type', op: 'in', value: 'story,job,poll' });
+            /* No type filter — must mirror +page.server.ts. The stories object
+             * holds only story/job/poll (pollopts deleted 2026-06-04), so the
+             * old `type in (story,job,poll)` is redundant and forced an
+             * uncovered multi-value `in` on the ordered walk. */
+            break;
     }
 
     const anchor = windowAnchor(referenceNowMs);

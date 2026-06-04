@@ -101,7 +101,8 @@ describe('keys time-window alignment', () => {
             criteria: [
                 { field: 'dead',    op: 'eq', value: 'false' },
                 { field: 'deleted', op: 'eq', value: 'false' },
-                { field: 'type',    op: 'in', value: 'story,job,poll' },
+                // No `type in` on the default category — pollopts were deleted,
+                // so the homepage default carries no type filter (see keys.ts).
                 { field: 'time',    op: 'gte', value: anchor - 24 * 60 * 60 * 1000 }
             ],
             order_by: 'score',
