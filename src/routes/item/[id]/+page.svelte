@@ -14,11 +14,29 @@
 	const ROOTS_STEP = 25;
 	let visibleRoots = $state(ROOTS_STEP);
 
+	/** Find the index of the top-level root thread whose subtree contains the
+	 *  comment keyed `key` — so a deep-linked `#c<key>` (e.g. from a profile
+	 *  comment) can be paged into view even when its root sits past the first
+	 *  ROOTS_STEP. Returns -1 if not found. */
+	function rootIndexContaining(roots: typeof data.comments, key: string): number {
+		const has = (node: (typeof roots)[number]): boolean =>
+			node.comment.key === key || node.children.some(has);
+		for (let r = 0; r < roots.length; r++) if (has(roots[r])) return r;
+		return -1;
+	}
+
 	afterNavigate(() => {
 		visibleRoots = ROOTS_STEP;
 		const hash = page.url.hash;
 		if (!hash) return;
 		const id = hash.slice(1);
+
+		// If the target is a comment (#c<key>) in a root thread beyond the first
+		// page, expand visibleRoots so it actually renders before we scroll.
+		if (id.startsWith('c')) {
+			const ri = rootIndexContaining(data.comments, id.slice(1));
+			if (ri >= visibleRoots) visibleRoots = ri + 1;
+		}
 
 		let i = 0;
 		(function retry() {
