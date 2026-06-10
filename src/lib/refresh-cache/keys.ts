@@ -160,7 +160,7 @@ export function* enumerateKeys(referenceNowMs: number = Date.now()): Generator<C
                     order: 'desc',
                     limit: PAGE_SIZE,
                     cursor: null,
-                    total: true
+                    total: "true"
                 };
                 const findKey = canonicalKey(findQ);
                 if (!seen.has(findKey)) {

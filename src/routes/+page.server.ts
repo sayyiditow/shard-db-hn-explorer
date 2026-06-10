@@ -203,7 +203,7 @@ export const load: PageServerLoad = async ({ url }) => {
 		order: 'desc',
 		limit: PAGE_SIZE,
 		cursor: cursor ?? null,
-		total: true
+		total: "true"
 	};
 
 	// Page number for display only — server doesn't use it; the cursor
