@@ -144,7 +144,7 @@ export function* enumerateKeys(referenceNowMs: number = Date.now()): Generator<C
     // First-page queries (duplicates collapse naturally — comment-source
     // queries rewrite popularity/hot → time so all three sorts map to
     // the same payload at most windows; we dedupe by canonical key).
-    // want_total: true eliminates the need for a separate count query,
+    // total: true eliminates the need for a separate count query,
     // returning {rows, cursor, total} in a single round-trip.
     for (const category of CATEGORIES) {
         for (const sort of SORTS) {
@@ -160,7 +160,7 @@ export function* enumerateKeys(referenceNowMs: number = Date.now()): Generator<C
                     order: 'desc',
                     limit: PAGE_SIZE,
                     cursor: null,
-                    want_total: true
+                    total: true
                 };
                 const findKey = canonicalKey(findQ);
                 if (!seen.has(findKey)) {
