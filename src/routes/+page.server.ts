@@ -192,6 +192,8 @@ export const load: PageServerLoad = async ({ url }) => {
 	// (even on page 1) — that's the only way to get the next-page cursor
 	// out of the response. Passing null means "start from page 1"; an
 	// object means "resume from this position".
+	// want_total: true returns the total match count alongside results
+	// in a single round-trip, eliminating a separate count query.
 	const findQuery: Record<string, unknown> = {
 		mode: 'find',
 		dir: 'hn',
@@ -200,7 +202,8 @@ export const load: PageServerLoad = async ({ url }) => {
 		order_by,
 		order: 'desc',
 		limit: PAGE_SIZE,
-		cursor: cursor ?? null
+		cursor: cursor ?? null,
+		want_total: true
 	};
 
 	// Page number for display only — server doesn't use it; the cursor
@@ -211,14 +214,13 @@ export const load: PageServerLoad = async ({ url }) => {
 
 	const t0 = performance.now();
 
-	// Five queries in parallel: page of results + page-scoped count +
+	// Four queries in parallel: page of results (with total) +
 	// three top-level "what's in the DB" counts for the stats strip.
 	// The three top-level counts hit kf header metadata (O(1) per
 	// object) so they're <10ms cold and basically free warm — cheap
 	// enough to fire on every home-page load.
-	const [pageResp, countResp, storiesTotal, commentsTotal, usersTotal] = await Promise.all([
+	const [pageResp, storiesTotal, commentsTotal, usersTotal] = await Promise.all([
 		cachedQuery(findQuery),
-		cachedQuery({ mode: 'count', dir: 'hn', object: sourceObject, criteria }),
 		cachedQuery<number>({ mode: 'count', dir: 'hn', object: 'stories' }),
 		cachedQuery<number>({ mode: 'count', dir: 'hn', object: 'comments' }),
 		cachedQuery<number>({ mode: 'count', dir: 'hn', object: 'users' })
@@ -232,8 +234,8 @@ export const load: PageServerLoad = async ({ url }) => {
 		users:    isError(usersTotal)    ? 0 : (usersTotal    as number)
 	};
 
-	if (isError(pageResp) || isError(countResp)) {
-		const err = isError(pageResp) ? pageResp.error : (countResp as { error: string }).error;
+	if (isError(pageResp)) {
+		const err = (pageResp as { error: string }).error;
 		return {
 			q, category, sort, window: win, by, page,
 			scoreMin, scoreMax, since: sinceRaw ?? null, until: untilRaw ?? null,
@@ -247,23 +249,17 @@ export const load: PageServerLoad = async ({ url }) => {
 		};
 	}
 
-	// Cursor mode returns {rows: [...], cursor: {...} | null}. Without
-	// cursor it returns a bare array. Normalise both shapes.
+	// Cursor mode returns {rows: [...], cursor: {...} | null, total: N}.
+	// want_total: true always returns this envelope when cursor is active.
 	type ValueRow = { key: string; value: Record<string, unknown> };
-	let rows: ValueRow[];
-	let nextCursor: string | null = null;
-	if (Array.isArray(pageResp)) {
-		rows = pageResp as ValueRow[];
-	} else {
-		const cr = pageResp as { rows: ValueRow[]; cursor: object | null };
-		rows = cr.rows;
-		nextCursor = cr.cursor ? encodeURIComponent(JSON.stringify(cr.cursor)) : null;
-	}
+	const cr = pageResp as { rows: ValueRow[]; cursor: object | null; total?: number };
+	const rows = cr.rows;
+	const nextCursor = cr.cursor ? encodeURIComponent(JSON.stringify(cr.cursor)) : null;
 
 	const items: Array<Story | Comment> = rows.map((r) =>
 		({ key: r.key, ...r.value } as Story | Comment)
 	);
-	const totalCount = countResp as number;
+	const totalCount = cr.total ?? 0;
 
 	return {
 		q, category, sort, window: win, by, page,
