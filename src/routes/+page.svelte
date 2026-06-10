@@ -117,6 +117,7 @@
 	// All current filter params carry over.
 	let nextHref = $derived.by(() => {
 		if (!data.nextCursor) return null;
+		if (totalPages != null && (data.page ?? 1) >= totalPages) return null;
 		const p = collectParams();
 		p.set('after', data.nextCursor);
 		p.set('page', String((data.page ?? 1) + 1));
