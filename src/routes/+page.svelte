@@ -126,7 +126,7 @@
 	// Range labels for the pagination footer: "Showing 51-75 of 210,520"
 	let rangeStart = $derived(((data.page ?? 1) - 1) * data.pageSize + 1);
 	let rangeEnd   = $derived(rangeStart + data.items.length - 1);
-	let totalPages = $derived(Math.max(1, Math.ceil(data.totalCount / data.pageSize)));
+	let totalPages = $derived(data.totalCount != null ? Math.max(1, Math.ceil(data.totalCount / data.pageSize)) : null);
 
 	// `Newer ←` is browser-back when we're not on page 1. Cursor
 	// pagination is forward-only, so the URL history IS the back
@@ -154,6 +154,7 @@
 				Browse Hacker News
 			{/if}
 		</h1>
+		{#if data.totalCount != null}
 		<p class="subtitle">
 			<strong>{data.totalCount.toLocaleString()}</strong> matching
 			{#if data.category === 'job'}
@@ -170,6 +171,7 @@
 				{data.totalCount === 1 ? 'story' : 'stories'}
 			{/if}
 		</p>
+		{/if}
 	</div>
 
 	<div class="header-controls">
@@ -381,8 +383,8 @@
 		>← Newer</a>
 
 		<div class="page-info">
-			<div class="page-num">Page {data.page ?? 1}<span class="of">of {totalPages.toLocaleString()}</span></div>
-			<div class="page-range">{rangeStart.toLocaleString()}–{rangeEnd.toLocaleString()} of {data.totalCount.toLocaleString()}</div>
+			<div class="page-num">Page {data.page ?? 1}{#if totalPages != null}<span class="of">of&nbsp;{totalPages.toLocaleString()}</span>{/if}</div>
+			<div class="page-range">{rangeStart.toLocaleString()}–{rangeEnd.toLocaleString()}{#if data.totalCount != null}&nbsp;of&nbsp;{data.totalCount.toLocaleString()}{/if}</div>
 		</div>
 
 		{#if nextHref}

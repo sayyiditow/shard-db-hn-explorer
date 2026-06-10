@@ -249,17 +249,18 @@ export const load: PageServerLoad = async ({ url }) => {
 		};
 	}
 
-	// Cursor mode returns {rows: [...], cursor: {...} | null, total: N}.
-	// want_total: true always returns this envelope when cursor is active.
+	// Cursor mode returns {rows: [...], cursor: {...} | null, total: N | null}.
+	// total is null when the planner can't cheaply count (e.g. icontains + post-filter
+	// criteria); the server fix (feat/total-hint-ks) will make it non-null for those cases.
 	type ValueRow = { key: string; value: Record<string, unknown> };
-	const cr = pageResp as { rows: ValueRow[]; cursor: object | null; total?: number };
+	const cr = pageResp as { rows: ValueRow[]; cursor: object | null; total?: number | null };
 	const rows = cr.rows;
 	const nextCursor = cr.cursor ? encodeURIComponent(JSON.stringify(cr.cursor)) : null;
 
 	const items: Array<Story | Comment> = rows.map((r) =>
 		({ key: r.key, ...r.value } as Story | Comment)
 	);
-	const totalCount = cr.total ?? 0;
+	const totalCount: number | null = cr.total ?? null;
 
 	return {
 		q, category, sort, window: win, by, page,
