@@ -83,7 +83,7 @@
 		<h2>
 			{pluralise(data.commentsTotal, 'comment')}
 			{#if data.story.descendants && data.commentsTotal < data.story.descendants}
-				<span class="of-total">of {data.story.descendants.toLocaleString()}</span>
+				<span class="of-total">of&nbsp;{data.story.descendants.toLocaleString()}</span>
 			{/if}
 		</h2>
 		<span class="timings">
