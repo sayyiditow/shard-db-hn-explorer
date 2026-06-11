@@ -194,16 +194,16 @@ export const load: PageServerLoad = async ({ url }) => {
 	// object means "resume from this position".
 	// want_total: true returns the total match count alongside results
 	// in a single round-trip, eliminating a separate count query.
-	const findQuery: Record<string, unknown> = {
-		mode: 'find',
+	const findQuery = {
+		mode: 'find' as const,
 		dir: 'hn',
 		object: sourceObject,
 		criteria,
 		order_by,
-		order: 'desc',
+		order: 'desc' as const,
 		limit: PAGE_SIZE,
-		cursor: cursor ?? null,
-		total: "true"
+		cursor: (cursor ?? null) as Record<string, unknown> | null,
+		total: true
 	};
 
 	// Page number for display only — server doesn't use it; the cursor

@@ -14,6 +14,7 @@
  *  result; a cold result renders "computing" rather than blocking the
  *  request for ~95s. */
 import { shardDb, isError } from '$lib/shard-db/client';
+import type { QueryBody } from '$lib/shard-db/query-types';
 
 export interface AggRow {
 	[k: string]: string | number;
@@ -81,7 +82,7 @@ const ts = () => new Date().toISOString();
 
 async function warmOne(
 	label: string,
-	query: Record<string, unknown>,
+	query: QueryBody,
 	slot: SlowEntry
 ): Promise<void> {
 	const t0 = Date.now();
@@ -112,8 +113,8 @@ export async function warmSlowStats(): Promise<void> {
 	if (state.warming) return;
 	state.warming = true;
 	try {
-		await warmOne('top-story-authors', TOP_STORY_AUTHORS_QUERY as Record<string, unknown>, state.authors);
-		await warmOne('top-commenters', TOP_COMMENTERS_QUERY as Record<string, unknown>, state.commenters);
+		await warmOne('top-story-authors', TOP_STORY_AUTHORS_QUERY as unknown as QueryBody, state.authors);
+		await warmOne('top-commenters', TOP_COMMENTERS_QUERY as unknown as QueryBody, state.commenters);
 	} finally {
 		state.warming = false;
 	}

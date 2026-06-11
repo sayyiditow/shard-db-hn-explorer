@@ -11,6 +11,7 @@
  *  want a one-off timeout to lock in a broken state for 5 minutes.
  *  Callers handle the error result and the next visitor retries live. */
 import { shardDb, isError, type ShardDbError } from '$lib/shard-db/client';
+import type { QueryBody } from '$lib/shard-db/query-types';
 import { get as getCached, set as setCached } from './cache';
 import { canonicalKey } from './keys';
 
@@ -29,7 +30,7 @@ GI[INFLIGHT_KEY] ??= new Map<string, Promise<unknown>>();
 const inflight: Map<string, Promise<unknown>> = GI[INFLIGHT_KEY];
 
 export async function cachedQuery<T = unknown>(
-	payload: Record<string, unknown>
+	payload: QueryBody
 ): Promise<T | ShardDbError> {
 	const key = canonicalKey(payload);
 	const hit = getCached(key);
