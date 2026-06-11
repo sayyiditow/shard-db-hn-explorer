@@ -8,18 +8,13 @@
  * Run: bun run scripts/setup-schema.ts
  */
 
-import { ShardDbClient, isError } from '../src/lib/shard-db/client';
+import { shardDb as client, isError } from '../src/lib/shard-db/client';
+import type { QueryBody } from '../src/lib/shard-db/query-types';
 import { INDEX_LISTS } from './lib/hn-schema';
-
-const client = new ShardDbClient({
-	host: process.env.SHARD_DB_HOST ?? '127.0.0.1',
-	port: process.env.SHARD_DB_PORT ? Number(process.env.SHARD_DB_PORT) : 9199,
-	token: process.env.SHARD_DB_TOKEN
-});
 
 const DIR = 'hn';
 
-async function step(label: string, body: Record<string, unknown>) {
+async function step(label: string, body: QueryBody) {
 	process.stdout.write(`  ${label} ... `);
 	const resp = await client.query(body);
 	if (isError(resp)) {
@@ -35,7 +30,10 @@ async function step(label: string, body: Record<string, unknown>) {
 }
 
 async function main() {
-	console.log(`Connecting to shard-db at ${process.env.SHARD_DB_HOST ?? '127.0.0.1'}:${process.env.SHARD_DB_PORT ?? 9199}`);
+	const connDesc = process.env.SHARD_DB_MODE === 'embedded'
+		? `embedded (root: ${process.env.SHARD_DB_ROOT})`
+		: `TCP ${process.env.SHARD_DB_HOST ?? '127.0.0.1'}:${process.env.SHARD_DB_PORT ?? 9199}`;
+	console.log(`shard-db connection: ${connDesc}`);
 	console.log('');
 
 	await step('add-dir hn', { mode: 'add-dir', dir: DIR });

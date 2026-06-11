@@ -17,13 +17,7 @@
  * Run: bun run scripts/sample-load.ts
  */
 
-import { ShardDbClient, isError } from '../src/lib/shard-db/client';
-
-const client = new ShardDbClient({
-	host: process.env.SHARD_DB_HOST ?? '127.0.0.1',
-	port: process.env.SHARD_DB_PORT ? Number(process.env.SHARD_DB_PORT) : 9199,
-	token: process.env.SHARD_DB_TOKEN
-});
+import { shardDb as client, isError } from '../src/lib/shard-db/client';
 
 const HN_BASE = 'https://hacker-news.firebaseio.com/v0';
 const SAMPLE_SIZE = Number(process.env.SAMPLE_SIZE ?? 10_000);
