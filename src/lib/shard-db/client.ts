@@ -12,6 +12,8 @@
  */
 
 import net from 'node:net';
+import type { QueryBody } from './query-types';
+import { EmbeddedShardDbClient } from './embedded';
 
 /** No-op data sink for idle pool sockets — see installIdleMarkers().
  *  Defined at module scope so removeListener can target it by identity. */
@@ -31,6 +33,12 @@ export interface ShardDbClientOptions {
 
 export interface ShardDbError {
 	error: string;
+}
+
+/** Shared interface implemented by ShardDbClient (TCP) and EmbeddedShardDbClient. */
+export interface IShardDbClient {
+	query<T = unknown>(body: QueryBody): Promise<T | ShardDbError>;
+	close(): void;
 }
 
 export class ShardDbClient {
@@ -53,7 +61,7 @@ export class ShardDbClient {
 		this.maxPoolSize = opts.maxPoolSize ?? 16;
 	}
 
-	async query<T = unknown>(body: Record<string, unknown>): Promise<T | ShardDbError> {
+	async query<T = unknown>(body: QueryBody): Promise<T | ShardDbError> {
 		const payload = JSON.stringify(this.token ? { ...body, token: this.token } : body);
 
 		const sock = await this.acquire();
@@ -244,12 +252,21 @@ export class ShardDbClient {
 	}
 }
 
-/** Default singleton; reads HOST / PORT / TOKEN from env for prod. */
-export const shardDb = new ShardDbClient({
-	host: process.env.SHARD_DB_HOST,
-	port: process.env.SHARD_DB_PORT ? Number(process.env.SHARD_DB_PORT) : undefined,
-	token: process.env.SHARD_DB_TOKEN
-});
+/** Default singleton — mode-switched via SHARD_DB_MODE.
+ *
+ *  SHARD_DB_MODE=embedded → in-process via npm native addon (no daemon).
+ *    Requires SHARD_DB_ROOT to be set to the absolute data dir path.
+ *  SHARD_DB_MODE unset    → TCP connection pool (default). */
+export const shardDb: IShardDbClient = process.env.SHARD_DB_MODE === 'embedded'
+	? new EmbeddedShardDbClient(
+		process.env.SHARD_DB_ROOT
+			?? (() => { throw new Error('SHARD_DB_ROOT must be set when SHARD_DB_MODE=embedded'); })()
+	  )
+	: new ShardDbClient({
+		host: process.env.SHARD_DB_HOST,
+		port: process.env.SHARD_DB_PORT ? Number(process.env.SHARD_DB_PORT) : undefined,
+		token: process.env.SHARD_DB_TOKEN
+	  });
 
 export function isError(resp: unknown): resp is ShardDbError {
 	return typeof resp === 'object' && resp !== null && 'error' in resp;
