@@ -9,10 +9,11 @@
  *  nothing (defaults to the real module-level instances); tests inject
  *  doubles.  This keeps unit tests free of module-loader patching. */
 
-import { shardDb as defaultClient, isError } from '$lib/shard-db/client';
+import { shardDb as defaultClient, isError, type IShardDbClient } from '$lib/shard-db/client';
 import * as state from './state';
 import * as defaultHn from './hn-api';
 import type { HnItem } from './hn-api';
+import type { QueryBody } from '$lib/shard-db/query-types';
 import * as cache from './cache';
 import { enumerateKeys } from './keys';
 import { truncateBytes } from './truncate';
@@ -48,7 +49,7 @@ export interface TickResult {
 }
 
 export interface TickDeps {
-	client?: { query: (q: Record<string, unknown>) => Promise<unknown> };
+	client?: { query: (q: QueryBody) => Promise<unknown> };
 	api?: {
 		getMaxItem: () => Promise<number>;
 		getItem: (id: number) => Promise<HnItem | null>;
@@ -93,7 +94,7 @@ async function rewarmCache(client: NonNullable<TickDeps['client']>): Promise<voi
 	const newMap = new Map<string, cache.Entry>();
 	let failed = 0;
 	for (const entry of enumerateKeys()) {
-		const r = await client.query(entry.query);
+		const r = await client.query(entry.query as QueryBody);
 		if (isError(r)) {
 			logWarn(`rewarm: query failed for ${entry.key}: ${(r as { error: string }).error}`);
 			failed++;

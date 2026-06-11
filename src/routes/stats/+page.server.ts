@@ -1,4 +1,5 @@
 import { isError } from '$lib/shard-db/client';
+import type { QueryBody } from '$lib/shard-db/query-types';
 import {
 	cachedQuery,
 	getTopCommenters,
@@ -39,7 +40,7 @@ function toNum(v: unknown): number {
 	return 0;
 }
 
-async function timed<T>(query: Record<string, unknown>): Promise<Panel<T>> {
+async function timed<T>(query: QueryBody): Promise<Panel<T>> {
 	const t0 = performance.now();
 	// Cache-then-fallthrough with write-on-success — first /stats hit
 	// after a cold start populates for everyone else; the refresh

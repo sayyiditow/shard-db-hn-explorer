@@ -107,10 +107,11 @@ describe('keys time-window alignment', () => {
             ],
             order_by: 'score',
             order: 'desc',
-            limit: 25,
-            cursor: null
-        };
+			limit: 25,
+			cursor: null,
+			total: true
+		};
 
-        expect(canonicalKey(routeFindQuery)).toBe(enumerated!.key);
+		expect(canonicalKey(routeFindQuery)).toBe(enumerated!.key);
     });
 });
