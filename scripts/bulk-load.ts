@@ -23,7 +23,7 @@ import {
 	parquetReadObjects,
 	byteLengthFromUrl
 } from 'hyparquet';
-import { ShardDbClient, isError } from '../src/lib/shard-db/client';
+import { shardDb, isError } from '../src/lib/shard-db/client';
 import { write as writeRefreshState, STATE_PATH as REFRESH_STATE_PATH } from '../src/lib/refresh-cache/state';
 import { truncateBytes } from '../src/lib/refresh-cache/truncate';
 import { INDEX_LISTS, indexFieldName } from './lib/hn-schema';
@@ -43,19 +43,12 @@ const USERS_URL = `${HF_BASE}/users.parquet`;
 
 const BULK_TARGET = parseTarget(process.env.BULK_TARGET ?? '1000000');
 
-/* Rows per bulk-insert call. At full-HN scale (44M items) the previous
- * 5000-row chunks meant 8800 daemon round-trips for items alone, each
- * paying parse + write + msync + tcp overhead. Daemon logs showed
- * per-chunk timing 150-360ms — total ~30-40 min just in fixed
- * per-call cost. Going to 100k cuts that to ~440 calls and amortises
- * the overhead.
- *
- * Trade-off: each call holds more rows in the daemon's request buffer
- * (~50 MB per call at 500 B/row). Bounded by MAX_REQUEST_SIZE in
- * db.env (default 100MB) — we set it to 100MB on the Netcup deploy
- * so this fits with headroom. */
+/* Rows per bulk-insert call. At full-HN scale (44M items) 100k-row
+ * chunks give ~440 calls total. The C engine's internal thread pool
+ * parallelises disk I/O within each call; larger chunks amortise the
+ * per-call overhead (~50 MB per call at 500 B/row, well within the
+ * 256 MB default query buffer). */
 const BULK_CHUNK = Number(process.env.BULK_CHUNK ?? 100_000);
-const PARALLEL_CONNS = 5;            // shard-db client pool size
 
 /* Items pipeline flushes stories + comments to shard-db every
    FLUSH_EVERY_ITEMS records read, so peak Bun heap stays bounded
@@ -132,61 +125,22 @@ function toMs(unixSec: bigint | number | undefined): number {
 	return s > 0 ? s * 1000 : 0;
 }
 
-// One connected client per worker. Each bulk-insert call is sequential
-// on a single connection; we get parallelism by holding N connections
-// open and round-robining work across them.
-// Default to the shard-db binary's own default (9199) so a manually
-// started daemon Just Works — matches setup-schema.ts + sample-load.ts.
-// When running on top of `bun run app`'s dev daemon (which uses 19199
-// to avoid clobbering any 9199 daemon), set SHARD_DB_PORT=19199
-// explicitly before invoking bulk-load.
-const DEFAULT_PORT = 9199;
-const SHARD_HOST = process.env.SHARD_DB_HOST ?? '127.0.0.1';
-const SHARD_PORT = process.env.SHARD_DB_PORT ? Number(process.env.SHARD_DB_PORT) : DEFAULT_PORT;
-const SHARD_TOKEN = process.env.SHARD_DB_TOKEN;
 
-function buildPool(size: number): ShardDbClient[] {
-	const pool: ShardDbClient[] = [];
-	for (let i = 0; i < size; i++) {
-		pool.push(
-			new ShardDbClient({
-				host: SHARD_HOST,
-				port: SHARD_PORT,
-				token: SHARD_TOKEN,
-				timeoutMs: 120_000
-			})
-		);
-	}
-	return pool;
-}
 
-async function bulkInsertParallel(
-	pool: ShardDbClient[],
+async function bulkInsert(
 	object: string,
 	records: { key: string; value: Record<string, unknown> }[]
 ): Promise<void> {
-	const chunks: typeof records[] = [];
 	for (let off = 0; off < records.length; off += BULK_CHUNK) {
-		chunks.push(records.slice(off, off + BULK_CHUNK));
-	}
-
-	// Round-robin chunks across connections, BATCH parallel
-	for (let i = 0; i < chunks.length; i += pool.length) {
-		const batch = chunks.slice(i, i + pool.length);
-		const results = await Promise.all(
-			batch.map((chunk, k) =>
-				pool[k].query({
-					mode: 'bulk-insert',
-					dir: 'hn',
-					object,
-					records: chunk
-				})
-			)
-		);
-		for (const r of results) {
-			if (isError(r)) {
-				throw new Error(`bulk-insert ${object} failed: ${r.error}`);
-			}
+		const chunk = records.slice(off, off + BULK_CHUNK);
+		const result = await shardDb.query({
+			mode: 'bulk-insert',
+			dir: 'hn',
+			object,
+			records: chunk
+		});
+		if (isError(result)) {
+			throw new Error(`bulk-insert ${object} failed: ${result.error}`);
 		}
 	}
 }
@@ -201,12 +155,12 @@ async function bulkInsertParallel(
  *
  * Idempotent: indexes already missing are ignored by the server.
  */
-async function dropIndexes(client: ShardDbClient, object: string): Promise<void> {
+async function dropIndexes(object: string): Promise<void> {
 	const specs = INDEX_LISTS[object];
 	if (!specs || specs.length === 0) return;
 	const fields = specs.map(indexFieldName);
 	process.stdout.write(`  drop ${fields.length} indexes on hn/${object} ... `);
-	const resp = await client.query({
+	const resp = await shardDb.query({
 		mode: 'remove-index',
 		dir: 'hn',
 		object,
@@ -231,12 +185,12 @@ async function dropIndexes(client: ShardDbClient, object: string): Promise<void>
  * server reads them from the JSON array and writes them into
  * index.conf so the planner picks the right index type per op.
  */
-async function addIndexes(client: ShardDbClient, object: string): Promise<void> {
+async function addIndexes(object: string): Promise<void> {
 	const specs = INDEX_LISTS[object];
 	if (!specs || specs.length === 0) return;
 	process.stdout.write(`  add ${specs.length} indexes on hn/${object} (one scan) ... `);
 	const t0 = performance.now();
-	const resp = await client.query({
+	const resp = await shardDb.query({
 		mode: 'add-index',
 		dir: 'hn',
 		object,
@@ -247,9 +201,9 @@ async function addIndexes(client: ShardDbClient, object: string): Promise<void> 
 	console.log(`${(ms / 1000).toFixed(1)}s`);
 }
 
-async function truncate(client: ShardDbClient, object: string): Promise<void> {
+async function truncate(object: string): Promise<void> {
 	process.stdout.write(`  truncate hn/${object} ... `);
-	const resp = await client.query({ mode: 'truncate', dir: 'hn', object });
+	const resp = await shardDb.query({ mode: 'truncate', dir: 'hn', object });
 	if (isError(resp)) {
 		console.log(`FAILED: ${resp.error}`);
 		throw new Error(resp.error);
@@ -261,7 +215,7 @@ function fmtCount(n: number): string {
 	return n.toLocaleString();
 }
 
-async function loadUsers(pool: ShardDbClient[]): Promise<number> {
+async function loadUsers(): Promise<number> {
 	console.log('\nUsers — fetching users.parquet metadata...');
 	const byteLength = await byteLengthFromUrl(USERS_URL);
 	console.log(`  users.parquet: ${(byteLength / 1e6).toFixed(1)} MB`);
@@ -292,13 +246,13 @@ async function loadUsers(pool: ShardDbClient[]): Promise<number> {
 		}));
 
 	const t0 = performance.now();
-	await bulkInsertParallel(pool, 'users', records);
+	await bulkInsert('users', records);
 	const ms = performance.now() - t0;
 	console.log(`  inserted ${fmtCount(records.length)} users in ${(ms / 1000).toFixed(1)}s`);
 	return records.length;
 }
 
-async function loadItems(pool: ShardDbClient[]): Promise<{ stories: number; comments: number; maxId: number }> {
+async function loadItems(): Promise<{ stories: number; comments: number; maxId: number }> {
 	console.log('\nItems — fetching items.parquet metadata...');
 	const byteLength = await byteLengthFromUrl(ITEMS_URL);
 	console.log(`  items.parquet: ${(byteLength / 1e9).toFixed(2)} GB`);
@@ -363,12 +317,12 @@ async function loadItems(pool: ShardDbClient[]): Promise<{ stories: number; comm
 		if (have === 0) return;
 		if (!final && have < FLUSH_EVERY_ITEMS) return;
 		if (stories.length > 0) {
-			await bulkInsertParallel(pool, 'stories', stories);
+			await bulkInsert('stories', stories);
 			totalStories += stories.length;
 			stories = [];
 		}
 		if (comments.length > 0) {
-			await bulkInsertParallel(pool, 'comments', comments);
+			await bulkInsert('comments', comments);
 			totalComments += comments.length;
 			comments = [];
 		}
@@ -463,38 +417,15 @@ async function loadItems(pool: ShardDbClient[]): Promise<{ stories: number; comm
 	return { stories: totalStories, comments: totalComments, maxId };
 }
 
-function findStoryRoot(commentId: number, items: Map<number, ItemMeta>): number {
-	const self = items.get(commentId);
-	if (!self) return commentId;
-	let parent = self.parent;
-	// HN comment chains are typically <= ~20 deep. Cap at 64 as a safety
-	// belt against pathological cycles in malformed data.
-	for (let i = 0; i < 64; i++) {
-		if (!parent || parent === 0) break;
-		const p = items.get(parent);
-		if (!p) return parent;       // parent outside our slice — best effort
-		if (p.type === 'story' || p.type === 'job' || p.type === 'poll') return parent;
-		parent = p.parent;
-	}
-	return parent || commentId;
-}
-
 async function main() {
-	const adminClient = new ShardDbClient({
-		host: SHARD_HOST,
-		port: SHARD_PORT,
-		token: SHARD_TOKEN,
-		timeoutMs: 60_000
-	});
-
 	console.log(`Bulk-load — anantn/hacker-news → shard-db`);
 	console.log(`  target items: ${BULK_TARGET === 0 ? 'FULL SNAPSHOT' : fmtCount(BULK_TARGET)}`);
-	console.log(`  shard-db:     ${SHARD_HOST}:${SHARD_PORT}`);
+	console.log(`  shard-db root: ${process.env.SHARD_DB_ROOT ?? '(not set)'}`);
 
 	console.log('\nTruncating existing data:');
-	await truncate(adminClient, 'stories');
-	await truncate(adminClient, 'comments');
-	await truncate(adminClient, 'users');
+	await truncate('stories');
+	await truncate('comments');
+	await truncate('users');
 
 	/* Load-then-index pattern. At full-HN scale (hundreds of millions
 	   of items) the per-(field, shard) merge cost on indexed bulk-insert
@@ -504,23 +435,21 @@ async function main() {
 	   Net win is ~2× at 25M and grows with scale. See docs/operations/
 	   bulk-loading.md in the shard-db repo. */
 	console.log('\nDropping indexes (load-then-index pattern):');
-	await dropIndexes(adminClient, 'stories');
-	await dropIndexes(adminClient, 'comments');
-	await dropIndexes(adminClient, 'users');
-
-	const pool = buildPool(PARALLEL_CONNS);
+	await dropIndexes('stories');
+	await dropIndexes('comments');
+	await dropIndexes('users');
 
 	const totalStart = performance.now();
-	const userCount = await loadUsers(pool);
-	const { stories, comments, maxId } = await loadItems(pool);
+	const userCount = await loadUsers();
+	const { stories, comments, maxId } = await loadItems();
 	const insertMs = performance.now() - totalStart;
 	console.log(`\nInsert phase total: ${(insertMs / 1000).toFixed(1)}s`);
 
 	console.log('\nBuilding indexes (one scan per object):');
 	const indexStart = performance.now();
-	await addIndexes(adminClient, 'users');
-	await addIndexes(adminClient, 'stories');
-	await addIndexes(adminClient, 'comments');
+	await addIndexes('users');
+	await addIndexes('stories');
+	await addIndexes('comments');
 	const indexMs = performance.now() - indexStart;
 	const totalMs = insertMs + indexMs;
 	console.log(`Index phase total: ${(indexMs / 1000).toFixed(1)}s`);
@@ -549,10 +478,7 @@ async function main() {
 	console.log(`  Max ID:    ${fmtCount(maxId)}`);
 	console.log(`  Total:     ${(totalMs / 1000).toFixed(1)}s`);
 
-	// Drain every pooled socket so Bun's event loop can exit; without
-	// this the idle pool keeps the process alive after the work is done.
-	adminClient.close();
-	for (const c of pool) c.close();
+	shardDb.close();
 }
 
 main().catch((err) => {
