@@ -8,6 +8,7 @@ import type { QueryBody } from './query-types';
 export interface INativeShardDb {
 	query(json: string): string;
 	close(): void;
+	setLogHandler?(fn: ((type: string, msg: string) => void) | null): void;
 }
 
 export class EmbeddedShardDbClient {
@@ -19,6 +20,12 @@ export class EmbeddedShardDbClient {
 	 */
 	constructor(dbRoot: string, _native?: INativeShardDb) {
 		this.db = _native ?? new ShardDb(dbRoot);
+		this.db.setLogHandler?.((type, msg) => {
+			const text = msg.trimEnd();
+			if (type === 'error') console.error(text);
+			else if (type === 'warn' || type === 'slow') console.warn(text);
+			else console.log(text);
+		});
 	}
 
 	async query<T = unknown>(body: QueryBody): Promise<T | ShardDbError> {
