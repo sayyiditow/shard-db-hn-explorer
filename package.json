@@ -28,6 +28,6 @@
 	},
 	"dependencies": {
 		"hyparquet": "^1.25.8",
-		"shard-db": "file:../shard-db/npm"
+		"shard-db": "^1.0.1"
 	}
 }
