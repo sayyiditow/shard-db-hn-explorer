@@ -6,7 +6,7 @@ import type { QueryBody } from './query-types';
  *  The native binding always receives raw JSON strings (object serialisation
  *  happens in EmbeddedShardDbClient.query before this is called). */
 export interface INativeShardDb {
-	query(json: string): string;
+	query(json: string): unknown;
 	close(): void;
 	setLogHandler?(fn: ((type: string, msg: string) => void) | null): void;
 }
@@ -29,8 +29,8 @@ export class EmbeddedShardDbClient {
 	}
 
 	async query<T = unknown>(body: QueryBody): Promise<T | ShardDbError> {
-		const raw = this.db.query(JSON.stringify(body));
-		return JSON.parse(raw) as T | ShardDbError;
+		const raw = await this.db.query(JSON.stringify(body));
+		return typeof raw === 'string' ? JSON.parse(raw) as T | ShardDbError : raw as T | ShardDbError;
 	}
 
 	close(): void {
