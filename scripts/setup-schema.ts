@@ -30,10 +30,7 @@ async function step(label: string, body: QueryBody) {
 }
 
 async function main() {
-	const connDesc = process.env.SHARD_DB_MODE === 'embedded'
-		? `embedded (root: ${process.env.SHARD_DB_ROOT})`
-		: `TCP ${process.env.SHARD_DB_HOST ?? '127.0.0.1'}:${process.env.SHARD_DB_PORT ?? 9199}`;
-	console.log(`shard-db connection: ${connDesc}`);
+	console.log(`shard-db root: ${process.env.SHARD_DB_ROOT ?? '(not set)'}`);
 	console.log('');
 
 	await step('add-dir hn', { mode: 'add-dir', dir: DIR });
