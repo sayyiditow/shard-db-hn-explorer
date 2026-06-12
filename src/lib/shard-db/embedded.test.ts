@@ -9,7 +9,7 @@ function makeFakeNative(responses: Record<string, unknown>): {
 } {
 	const calls: string[] = [];
 	const native: INativeShardDb = {
-		query(json: string): string {
+		query(json: string): unknown {
 			calls.push(json);
 			const body = JSON.parse(json) as Record<string, unknown>;
 			const resp = responses[body.mode as string] ?? { ok: true };
