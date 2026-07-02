@@ -2,6 +2,7 @@
 	import { relativeTime, absoluteTime, hnItemUrl } from '$lib/hn/format';
 	import { sanitiseHnHtml } from '$lib/hn/sanitize';
 	import type { CommentNode } from '$lib/hn/comment-tree';
+	import Comment from './Comment.svelte';
 
 	interface Props {
 		node: CommentNode;
@@ -59,9 +60,7 @@
 		{#if node.children.length > 0}
 			<div class="children">
 				{#each node.children as child (child.comment.key)}
-					{#await import('./Comment.svelte') then m}
-						<m.default node={child} depth={depth + 1} />
-					{/await}
+					<Comment node={child} depth={depth + 1} />
 				{/each}
 			</div>
 		{/if}
