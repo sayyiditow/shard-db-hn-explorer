@@ -1,33 +1,37 @@
 {
-	"name": "shard-db-hn-explorer",
-	"private": true,
-	"version": "0.0.1",
-	"type": "module",
-	"scripts": {
-		"app": "./scripts/dev.sh",
-		"bulk-load": "bun run scripts/bulk-load.ts",
-		"dev": "bun --bun vite dev",
-		"build": "bun --bun vite build && bun run build:scripts",
-		"build:scripts": "bun build scripts/setup-schema.ts scripts/bulk-load.ts --target=bun --outdir=build/scripts",
-		"preview": "bun --bun vite preview",
-		"prepare": "svelte-kit sync || echo ''",
-		"test": "bun test",
-		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
-		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch"
-	},
-	"devDependencies": {
-		"@sveltejs/adapter-node": "^5.5.4",
-		"@sveltejs/kit": "^2.57.0",
-		"@sveltejs/vite-plugin-svelte": "^7.0.0",
-		"@types/bun": "^1.3.14",
-		"@types/node": "^25.9.0",
-		"svelte": "^5.55.2",
-		"svelte-check": "^4.4.6",
-		"typescript": "^6.0.2",
-		"vite": "^8.0.7"
-	},
-	"dependencies": {
-		"hyparquet": "^1.25.8",
-		"shard-db": "^1.0.1"
-	}
+  "name": "shard-db-hn-explorer",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "app": "./scripts/dev.sh",
+    "bulk-load": "bun run scripts/bulk-load.ts",
+    "dev": "bun --bun vite dev",
+    "build": "bun --bun vite build && bun run build:scripts && bun run build:copy-native",
+    "build:scripts": "bun build scripts/setup-schema.ts scripts/bulk-load.ts scripts/compact.ts --target=bun --outdir=build/scripts",
+    "build:copy-native": "mkdir -p build/node_modules && cp -rL node_modules/shard-db build/node_modules/ && (cp -r node_modules/node-gyp-build build/node_modules/ 2>/dev/null || cp -rL node_modules/shard-db/node_modules/node-gyp-build build/node_modules/)",
+    "preview": "bun --bun vite preview",
+    "prepare": "svelte-kit sync || echo ''",
+    "test": "bun test",
+    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+    "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch"
+  },
+  "devDependencies": {
+    "@sveltejs/adapter-node": "^5.5.4",
+    "@sveltejs/kit": "^2.65.2",
+    "@sveltejs/vite-plugin-svelte": "^7.1.2",
+    "@types/bun": "^1.3.14",
+    "@types/node": "^25.9.3",
+    "svelte": "^5.56.3",
+    "svelte-check": "^4.6.0",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.16"
+  },
+  "dependencies": {
+    "hyparquet": "^1.26.0",
+    "shard-db": "file:../shard-db/npm"
+  },
+  "trustedDependencies": [
+    "shard-db"
+  ]
 }

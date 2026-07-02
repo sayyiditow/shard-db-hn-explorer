@@ -33,3 +33,4 @@ db.env.*
 tmp/
 .hn-refresh-state.json
 .history
+.serena

@@ -26,7 +26,7 @@ import {
 import { shardDb, isError } from '../src/lib/shard-db/client';
 import { write as writeRefreshState, STATE_PATH as REFRESH_STATE_PATH } from '../src/lib/refresh-cache/state';
 import { truncateBytes } from '../src/lib/refresh-cache/truncate';
-import { INDEX_LISTS, indexFieldName } from './lib/hn-schema';
+import { INDEX_LISTS } from './lib/hn-schema';
 
 // Field byte-budgets mirror scripts/setup-schema.ts and refresh.ts.
 // shard-db rejects inserts with varchar content > N bytes; we
@@ -158,13 +158,17 @@ async function bulkInsert(
 async function dropIndexes(object: string): Promise<void> {
 	const specs = INDEX_LISTS[object];
 	if (!specs || specs.length === 0) return;
-	const fields = specs.map(indexFieldName);
-	process.stdout.write(`  drop ${fields.length} indexes on hn/${object} ... `);
+	// remove-index matches index.conf lines exactly — typed indexes are
+	// stored with their suffix (e.g. "title:trigram"), so the type must
+	// be preserved here, not stripped like indexFieldName used to do.
+	// Stripping meant this call silently dropped nothing for any typed
+	// index on every bulk-load run.
+	process.stdout.write(`  drop ${specs.length} indexes on hn/${object} ... `);
 	const resp = await shardDb.query({
 		mode: 'remove-index',
 		dir: 'hn',
 		object,
-		fields
+		fields: specs
 	});
 	if (isError(resp)) {
 		// "no index" / "not found" is fine on first run or partial state

@@ -33,3 +33,7 @@ export const shardDb: IShardDbClient = new Proxy({} as IShardDbClient, {
 export function isError(resp: unknown): resp is ShardDbError {
 	return typeof resp === 'object' && resp !== null && 'error' in resp;
 }
+
+export function closeShardDb(): void {
+	if (_shardDb) _shardDb.close();
+}
