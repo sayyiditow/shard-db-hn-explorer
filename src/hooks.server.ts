@@ -8,6 +8,11 @@
 
 import type { Handle } from '@sveltejs/kit';
 import { start } from '$lib/refresh-cache';
+import { closeShardDb } from '$lib/shard-db/client';
+
+const shutdown = () => { closeShardDb(); process.exit(0); };
+process.on('SIGTERM', shutdown);
+process.on('SIGINT',  shutdown);
 
 let started = false;
 

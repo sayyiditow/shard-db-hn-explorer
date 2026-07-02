@@ -43,14 +43,3 @@ export const INDEX_LISTS: Record<string, string[]> = {
 	],
 	users: ['karma', 'created']
 };
-
-/**
- * Strip the type suffix (`:trigram`, `:bitmap`) off an index entry so
- * we can pass just the field/composite name to add-index / remove-index.
- * `cmd_add_indexes` re-reads the type from index.conf; the wire payload
- * is field names only.
- */
-export function indexFieldName(spec: string): string {
-	const colon = spec.indexOf(':');
-	return colon < 0 ? spec : spec.slice(0, colon);
-}
