@@ -86,14 +86,15 @@ async function zeroStoriesWithoutComments(hasComments: Set<number>): Promise<num
 		if (isError(resp)) {
 			throw new Error(`fetch stories @offset=${offset} failed: ${resp.error}`);
 		}
-		const rows = resp as Array<{ key: string; value: { descendants: number } }>;
-		if (rows.length === 0) break;
+		const dict = resp as Record<string, { descendants: number }>;
+		const entries = Object.entries(dict);
+		if (entries.length === 0) break;
 
 		const zeroBatch: Record<string, { descendants: number }> = {};
-		for (const row of rows) {
-			const id = Number(row.key);
-			if (!hasComments.has(id) && row.value.descendants !== 0) {
-				zeroBatch[row.key] = { descendants: 0 };
+		for (const [key, value] of entries) {
+			const id = Number(key);
+			if (!hasComments.has(id) && value.descendants !== 0) {
+				zeroBatch[key] = { descendants: 0 };
 			}
 		}
 		if (Object.keys(zeroBatch).length > 0) {
@@ -106,7 +107,7 @@ async function zeroStoriesWithoutComments(hasComments: Set<number>): Promise<num
 			zeroed += Object.keys(zeroBatch).length;
 		}
 
-		offset += rows.length;
+		offset += entries.length;
 		console.log(`  fetched ${offset} stories so far (${zeroed} zeroed)`);
 	}
 	return zeroed;
