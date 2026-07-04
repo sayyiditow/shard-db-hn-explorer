@@ -1,3 +1,7 @@
+<script lang="ts">
+	let { refreshIntervalMinutes }: { refreshIntervalMinutes: number } = $props();
+</script>
+
 <footer>
 	<div class="inner">
 		<p>
@@ -5,7 +9,7 @@
 			<a href="https://github.com/sayyiditow/shard-db" target="_blank" rel="noopener">shard-db</a>.
 			Data from the
 			<a href="https://github.com/HackerNews/API" target="_blank" rel="noopener">Hacker News API</a>.
-			Refreshed every 5 minutes.
+			Refreshed every {refreshIntervalMinutes} minute{refreshIntervalMinutes === 1 ? '' : 's'}.
 		</p>
 		<p class="meta">
 			<a href="https://github.com/sayyiditow/shard-db-hn-explorer" target="_blank" rel="noopener">Source</a>

@@ -281,11 +281,20 @@ export async function tick(deps: TickDeps = {}): Promise<TickResult> {
 	};
 }
 
-const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+/* Configurable via REFRESH_INTERVAL_MINUTES so the cadence can be tuned
+ * per-deploy without a code change. Falls back to the default on unset,
+ * non-numeric, or non-positive values. */
+const DEFAULT_REFRESH_INTERVAL_MINUTES = 15;
+const parsedIntervalMinutes = Number(process.env.REFRESH_INTERVAL_MINUTES);
+export const REFRESH_INTERVAL_MINUTES =
+	Number.isFinite(parsedIntervalMinutes) && parsedIntervalMinutes > 0
+		? parsedIntervalMinutes
+		: DEFAULT_REFRESH_INTERVAL_MINUTES;
+const REFRESH_INTERVAL_MS = REFRESH_INTERVAL_MINUTES * 60 * 1000;
 /* Slow all-time stats (top commenters / top story authors) recompute on
  * their own 1-hour cadence — they're whole-history rankings that don't move
  * minute to minute, and the commenter walk is ~95s (far too slow for the
- * 5-min tick). First warm is delayed so the main cache + first item tick get
+ * main tick). First warm is delayed so the main cache + first item tick get
  * the cold-start window to themselves before we kick off the heavy scan. */
 const SLOW_STATS_INTERVAL_MS = 60 * 60 * 1000;
 const SLOW_STATS_FIRST_DELAY_MS = 20 * 1000;

@@ -4,11 +4,12 @@
  *  - Cache miss → run the query, and on a non-error response store the
  *    result under the canonical key so the next visitor gets it free.
  *
- *  The 5-min refresh tick rebuilds the cache map wholesale, so mid-tick
- *  writes added here age out naturally on the next swap.  No TTL.
+ *  The refresh tick (cadence: REFRESH_INTERVAL_MINUTES) rebuilds the cache
+ *  map wholesale, so mid-tick writes added here age out naturally on the
+ *  next swap.  No TTL.
  *
  *  ShardDbError responses (`{ error: ... }`) are NOT cached — we don't
- *  want a one-off timeout to lock in a broken state for 5 minutes.
+ *  want a one-off timeout to lock in a broken state until the next tick.
  *  Callers handle the error result and the next visitor retries live. */
 import { shardDb, isError, type ShardDbError } from '$lib/shard-db/client';
 import type { QueryBody } from '$lib/shard-db/query-types';
