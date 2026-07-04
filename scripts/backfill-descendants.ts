@@ -32,6 +32,7 @@ import type { QueryBody } from '../src/lib/shard-db/query-types';
 const DIR = 'hn';
 const COMMENT_ID_CHUNK = 200_000;
 const STORY_FETCH_PAGE = 50_000;
+const ZERO_FLUSH_SIZE = 50_000;
 
 interface AggRow { story_root: number; n: number }
 
@@ -73,10 +74,30 @@ async function backfillRange(lo: number, hi: number): Promise<Set<number>> {
 
 /** Phase 2: page through every story; zero out `descendants` on any
  *  story `hasComments` didn't see in phase 1 (and whose descendants
- *  isn't already 0 — skip the no-op write). */
+ *  isn't already 0 — skip the no-op write). Zero-candidates are
+ *  accumulated across fetch pages into `pending` and only flushed via
+ *  `bulk-update` once ~ZERO_FLUSH_SIZE records are pending (plus one
+ *  final flush for the remainder). On a re-run against an already-mostly
+ *  -correct corpus, most 50k-row pages yield only a handful of real
+ *  candidates — flushing per-page would turn this into thousands of
+ *  tiny round trips instead of a much smaller number of large ones. */
 async function zeroStoriesWithoutComments(hasComments: Set<number>): Promise<number> {
 	let offset = 0;
 	let zeroed = 0;
+	let pending: Record<string, { descendants: number }> = {};
+
+	const flushPending = async (): Promise<void> => {
+		const n = Object.keys(pending).length;
+		if (n === 0) return;
+		const upd = await shardDb.query({
+			mode: 'bulk-update', dir: DIR, object: 'stories', records: pending
+		} as unknown as QueryBody);
+		if (isError(upd)) {
+			throw new Error(`bulk-update (zero) @offset=${offset} failed: ${upd.error}`);
+		}
+		zeroed += n;
+		pending = {};
+	};
 
 	for (;;) {
 		const resp = await shardDb.query({
@@ -90,26 +111,21 @@ async function zeroStoriesWithoutComments(hasComments: Set<number>): Promise<num
 		const entries = Object.entries(dict);
 		if (entries.length === 0) break;
 
-		const zeroBatch: Record<string, { descendants: number }> = {};
 		for (const [key, value] of entries) {
 			const id = Number(key);
 			if (!hasComments.has(id) && value.descendants !== 0) {
-				zeroBatch[key] = { descendants: 0 };
+				pending[key] = { descendants: 0 };
 			}
 		}
-		if (Object.keys(zeroBatch).length > 0) {
-			const upd = await shardDb.query({
-				mode: 'bulk-update', dir: DIR, object: 'stories', records: zeroBatch
-			} as unknown as QueryBody);
-			if (isError(upd)) {
-				throw new Error(`bulk-update (zero) @offset=${offset} failed: ${upd.error}`);
-			}
-			zeroed += Object.keys(zeroBatch).length;
+		if (Object.keys(pending).length >= ZERO_FLUSH_SIZE) {
+			await flushPending();
 		}
 
 		offset += entries.length;
-		console.log(`  fetched ${offset} stories so far (${zeroed} zeroed)`);
+		console.log(`  fetched ${offset} stories so far (${zeroed} zeroed, ${Object.keys(pending).length} pending)`);
 	}
+
+	await flushPending();
 	return zeroed;
 }
 
