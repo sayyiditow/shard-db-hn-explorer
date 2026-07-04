@@ -6,11 +6,11 @@
  *  minute, but they're expensive: the commenters group_by walks the full
  *  comment set (~95s cold), and even the authors group_by is ~860ms warm.
  *
- *  Recomputing either on the 5-min cache rewarm is pure waste — an all-time
- *  ranking doesn't shift in 5 minutes, and the commenters query is far too
+ *  Recomputing either on the main cache rewarm is pure waste — an all-time
+ *  ranking doesn't shift in minutes, and the commenters query is far too
  *  slow for that tick anyway. So they live here on a 1-hour cadence,
  *  deliberately OUT of the main swapped cache (which is rebuilt wholesale
- *  every 5 min and would drop them). The stats page reads the last good
+ *  every tick and would drop them). The stats page reads the last good
  *  result; a cold result renders "computing" rather than blocking the
  *  request for ~95s. */
 import { shardDb, isError } from '$lib/shard-db/client';

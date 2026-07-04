@@ -5,7 +5,7 @@
 	import NavigationLoader from '$lib/components/NavigationLoader.svelte';
 	import '$lib/styles/tokens.css';
 
-	let { children } = $props();
+	let { children, data } = $props();
 </script>
 
 <svelte:head>
@@ -20,7 +20,7 @@
 	<main>
 		{@render children()}
 	</main>
-	<Footer />
+	<Footer refreshIntervalMinutes={data.refreshIntervalMinutes} />
 </div>
 
 <style>

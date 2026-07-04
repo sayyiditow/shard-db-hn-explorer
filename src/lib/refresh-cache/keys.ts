@@ -220,7 +220,7 @@ export function* enumerateKeys(referenceNowMs: number = Date.now()): Generator<C
     //
     // NOTE: the all-time rankings (top story authors, top commenters) are
     // deliberately NOT here. They're whole-history group_bys that don't move
-    // minute to minute; recomputing them on this 5-min tick is waste (and the
+    // minute to minute; recomputing them on the main refresh tick is waste (and the
     // commenter walk is ~95s). They live in slow-stats.ts on a 1-hour cadence
     // and the /stats page reads them cache-only from there.
     const statsQueries: Record<string, unknown>[] = [

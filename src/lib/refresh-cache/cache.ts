@@ -40,7 +40,7 @@ export function get(key: string): unknown | null {
 }
 
 /** Write-through on cache miss — first visitor pays, everyone else hits.
- *  The 5-min refresh swap() replaces the whole map so these mid-tick
+ *  The refresh tick's swap() replaces the whole map so these mid-tick
  *  writes naturally age out; no separate eviction needed.  Bounded by
  *  MAX_ENTRIES to defend against query-shape explosion (e.g. /search
  *  with arbitrary text, /u/<random>) within a single tick. */

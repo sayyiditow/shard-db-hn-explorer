@@ -81,7 +81,7 @@ export const load: PageServerLoad = async () => {
 	/* All-time rankings (top story authors, top commenters) are served
 	   cache-only from slow-stats.ts — warmed hourly in the background. They're
 	   whole-history group_bys (5.6M stories, 38.5M comments); recomputing them
-	   on every page load (or the 5-min cache tick) is waste, and the commenter
+	   on every page load (or the main cache tick) is waste, and the commenter
 	   walk is ~95s, far too slow for a live request. The background warm uses a
 	   high timeout_ms; here we just read the last good result. */
 	const tSlow = performance.now();
