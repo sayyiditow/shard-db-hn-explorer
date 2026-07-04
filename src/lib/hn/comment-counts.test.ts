@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { fetchLiveCommentCounts, applyLiveCommentCounts } from './comment-counts';
+import { fetchLiveCommentCounts } from './comment-counts';
 import type { QueryBody } from '$lib/shard-db/query-types';
 
 describe('fetchLiveCommentCounts', () => {
@@ -60,34 +60,5 @@ describe('fetchLiveCommentCounts', () => {
 			aggregates: [{ fn: 'count', alias: 'n' }],
 			criteria: [{ field: 'story_root', op: 'in', value: [10, 20] }]
 		});
-	});
-});
-
-describe('applyLiveCommentCounts', () => {
-	test('returns input unchanged for an empty array', async () => {
-		const out = await applyLiveCommentCounts([]);
-		expect(out).toEqual([]);
-	});
-
-	test('overwrites descendants with live counts, defaulting absent ids to 0', async () => {
-		const stories = [
-			{ key: '1', descendants: 99 },
-			{ key: '2', descendants: 42 }
-		];
-		const out = await applyLiveCommentCounts(stories, {
-			query: async () => [{ story_root: 1, n: 7 }]
-		});
-		expect(out).toEqual([
-			{ key: '1', descendants: 7 },
-			{ key: '2', descendants: 0 }
-		]);
-	});
-
-	test('returns stories unmodified when the aggregate query fails', async () => {
-		const stories = [{ key: '1', descendants: 99 }];
-		const out = await applyLiveCommentCounts(stories, {
-			query: async () => ({ error: 'timeout' })
-		});
-		expect(out).toEqual(stories);
 	});
 });

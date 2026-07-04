@@ -1,6 +1,5 @@
 import { error } from '@sveltejs/kit';
 import { shardDb, isError } from '$lib/shard-db/client';
-import { applyLiveCommentCounts } from '$lib/hn/comment-counts';
 import type { UserProfile, Story, Comment } from '$lib/hn/types';
 import type { PageServerLoad } from './$types';
 
@@ -58,7 +57,7 @@ export const load: PageServerLoad = async ({ params }) => {
 		storiesError = storiesResp.error;
 	} else {
 		const arr = storiesResp as Array<{ key: string; value: Omit<Story, 'key'> }>;
-		stories = await applyLiveCommentCounts(arr.map((r) => ({ key: r.key, ...r.value })));
+		stories = arr.map((r) => ({ key: r.key, ...r.value }));
 	}
 
 	let comments: Comment[] = [];

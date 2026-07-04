@@ -1,6 +1,5 @@
 import { isError } from '$lib/shard-db/client';
 import { cachedQuery, windowAnchor } from '$lib/refresh-cache';
-import { applyLiveCommentCounts } from '$lib/hn/comment-counts';
 import type { Story, Comment } from '$lib/hn/types';
 import type { PageServerLoad } from './$types';
 
@@ -258,12 +257,9 @@ export const load: PageServerLoad = async ({ url }) => {
 	const rows = cr.rows;
 	const nextCursor = cr.cursor ? encodeURIComponent(JSON.stringify(cr.cursor)) : null;
 
-	let items: Array<Story | Comment> = rows.map((r) =>
+	const items: Array<Story | Comment> = rows.map((r) =>
 		({ key: r.key, ...r.value } as Story | Comment)
 	);
-	if (sourceObject === 'stories') {
-		items = await applyLiveCommentCounts(items as Story[]);
-	}
 	const totalCount: number | null = cr.total ?? null;
 
 	return {

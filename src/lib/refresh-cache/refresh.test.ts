@@ -13,6 +13,7 @@ function makeDeps(overrides: {
     getMaxItem?: () => Promise<number>;
     items?: HnItem[];
     parentLookups?: Record<string, { type?: string; story_root?: number }>;
+    aggregateResponse?: unknown;
 } = {}): { deps: TickDeps; queries: Record<string, unknown>[] } {
     const queries: Record<string, unknown>[] = [];
     const parentLookups = overrides.parentLookups ?? {};
@@ -29,6 +30,12 @@ function makeDeps(overrides: {
                     }
                     if (q.mode === 'bulk-insert') {
                         return { inserted: (q.records as unknown[]).length };
+                    }
+                    if (q.mode === 'aggregate') {
+                        return overrides.aggregateResponse ?? [];
+                    }
+                    if (q.mode === 'bulk-update') {
+                        return { updated: Object.keys((q.records as Record<string, unknown>) ?? {}).length };
                     }
                     return { ok: true };
                 }
@@ -163,5 +170,65 @@ describe('refresh tick', () => {
         await tick(deps);
         expect(cache.stats().lastSwapAt).toBe(before);
         expect(cache.get('sentinel')).toBe('untouched');
+    });
+
+    test('new comments on an old story trigger a targeted descendants sync', async () => {
+        // Story 500 was inserted in an earlier tick — it's NOT part of
+        // this tick's own `items`, so its stored `descendants` is stale
+        // until this tick's new comment (parent=500) triggers a sync.
+        await write(600);
+        const { deps, queries } = makeDeps({
+            getMaxItem: async () => 601,
+            items: [
+                { id: 601, type: 'comment', by: 'z', time: 1,
+                  parent: 500, deleted: false, dead: false }
+            ] as HnItem[],
+            aggregateResponse: [{ story_root: 500, n: 12 }]
+        });
+        await tick(deps);
+
+        const agg = queries.find((q) => q.mode === 'aggregate');
+        expect(agg).toMatchObject({
+            dir: 'hn', object: 'comments',
+            group_by: ['story_root'],
+            criteria: [{ field: 'story_root', op: 'in', value: [500] }]
+        });
+
+        const upd = queries.find((q) => q.mode === 'bulk-update');
+        expect(upd).toMatchObject({
+            dir: 'hn', object: 'stories',
+            records: { '500': { descendants: 12 } }
+        });
+    });
+
+    test('comments on a story inserted THIS tick are excluded from the sync', async () => {
+        await write(700);
+        const { deps, queries } = makeDeps({
+            getMaxItem: async () => 702,
+            items: [
+                { id: 701, type: 'story', by: 'a', time: 1, title: 't', score: 1,
+                  url: '', text: '', descendants: 3, deleted: false, dead: false },
+                { id: 702, type: 'comment', by: 'b', time: 2,
+                  parent: 701, deleted: false, dead: false }
+            ] as HnItem[]
+        });
+        await tick(deps);
+        // story 701 came in with the tick's own bulk-insert (descendants
+        // straight from HN) — no separate aggregate/bulk-update needed.
+        expect(queries.some((q) => q.mode === 'aggregate')).toBe(false);
+        expect(queries.some((q) => q.mode === 'bulk-update')).toBe(false);
+    });
+
+    test('tick with no comments never fires a descendants sync', async () => {
+        await write(800);
+        const { deps, queries } = makeDeps({
+            getMaxItem: async () => 801,
+            items: [
+                { id: 801, type: 'story', by: 'a', time: 1, title: 't', score: 1,
+                  url: '', text: '', descendants: 0, deleted: false, dead: false }
+            ] as HnItem[]
+        });
+        await tick(deps);
+        expect(queries.some((q) => q.mode === 'aggregate')).toBe(false);
     });
 });
