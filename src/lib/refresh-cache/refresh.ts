@@ -18,6 +18,7 @@ import * as cache from './cache';
 import { enumerateKeys } from './keys';
 import { truncateBytes } from './truncate';
 import { warmSlowStats } from './slow-stats';
+import { fetchLiveCommentCounts } from '$lib/hn/comment-counts';
 
 // Field byte-budgets mirror scripts/setup-schema.ts. Keep in sync:
 // shard-db rejects inserts with varchar content > N bytes, so we
@@ -81,6 +82,51 @@ async function resolveStoryRoot(
 		return typeof sr === 'number' ? sr : parentId;
 	}
 	return parentId;  // unknown — best-effort
+}
+
+/** After ingesting this tick's comments, some of them belong to stories
+ *  that were NOT re-fetched this tick (their own HN item id fell in an
+ *  earlier tick's range) — the `descendants` stored on those stories is
+ *  a stale snapshot from whenever they were first ingested, since
+ *  refresh.ts never re-fetches an old item's own HN record. Recompute
+ *  the live comment count for just those "old" story ids and write it
+ *  back, so stored `descendants` stays accurate without a per-page-load
+ *  aggregate query. Stories inserted THIS tick are skipped — their
+ *  `descendants` already came straight from HN's own live item fetch. */
+async function syncStaleDescendants(
+	client: NonNullable<TickDeps['client']>,
+	comments: ShardRecord[],
+	storyIdsThisTick: Set<number>
+): Promise<void> {
+	const oldStoryRoots = new Set<number>();
+	for (const c of comments) {
+		const sr = c.value.story_root;
+		if (typeof sr === 'number' && sr > 0 && !storyIdsThisTick.has(sr)) {
+			oldStoryRoots.add(sr);
+		}
+	}
+	if (oldStoryRoots.size === 0) return;
+
+	const ids = Array.from(oldStoryRoots);
+	const counts = await fetchLiveCommentCounts(ids.map(String), { query: client.query });
+	if (counts === null) {
+		logWarn(`syncStaleDescendants: aggregate failed for ${ids.length} old story ids, skipping`);
+		return;
+	}
+
+	const records: Record<string, { descendants: number }> = {};
+	for (const id of ids) {
+		records[String(id)] = { descendants: counts.get(String(id)) ?? 0 };
+	}
+
+	const r = await client.query({
+		mode: 'bulk-update', dir: DIR, object: 'stories', records
+	} as unknown as QueryBody);
+	if (isError(r)) {
+		logWarn(`syncStaleDescendants: bulk-update failed: ${(r as { error: string }).error}`);
+		return;
+	}
+	logInfo(`synced descendants for ${ids.length} old stories from ${comments.length} new comments`);
 }
 
 interface ShardRecord { key: string; value: Record<string, unknown>; }
@@ -258,6 +304,11 @@ export async function tick(deps: TickDeps = {}): Promise<TickResult> {
 			}
 			await Promise.all(tasks);
 			logInfo(`upserted: stories=${storiesInserted} comments=${commentsInserted} users=${usersInserted} in ${Date.now() - tUpsert}ms`);
+
+			if (comments.length) {
+				const storyIdsThisTick = new Set(stories.map((s) => Number(s.key)));
+				await syncStaleDescendants(client, comments, storyIdsThisTick);
+			}
 		} catch (e) {
 			logErr(`upsert failed: ${(e as Error).message}`);
 			return emptyResult(lastSeen, (e as Error).message);

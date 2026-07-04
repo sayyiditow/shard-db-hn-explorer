@@ -6,6 +6,7 @@
   "scripts": {
     "app": "./scripts/dev.sh",
     "bulk-load": "bun run scripts/bulk-load.ts",
+    "backfill-descendants": "bun run scripts/backfill-descendants.ts",
     "dev": "bun --bun vite dev",
     "build": "bun --bun vite build && bun run build:scripts && bun run build:copy-native",
     "build:scripts": "bun build scripts/setup-schema.ts scripts/bulk-load.ts scripts/compact.ts --target=bun --outdir=build/scripts",

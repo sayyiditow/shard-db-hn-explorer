@@ -13,17 +13,16 @@ export interface CommentCountsDeps {
 /**
  * Live comment counts for a set of story ids, keyed on the already-indexed
  * `story_root` field on the `comments` object. One grouped aggregate call
- * covers every story on the page in a single round trip, instead of one
+ * covers every requested story in a single round trip, instead of one
  * `count` query per story.
  *
- * Routed through `cachedQuery` (the same write-through cache every other
- * route query uses) rather than calling `shardDb.query` directly: the
- * first visitor for a given set of story ids pays the aggregate query,
- * everyone else requesting the same set hits the in-memory cache until
- * the next refresh-tick rewarm wipes it. Without this, the aggregate
- * re-ran on every single page visit to `/`, `/trending`, and
- * `/u/[username]` — this was the actual per-request cost, independent of
- * how often the refresh tick itself runs.
+ * Called from refresh-cache's `tick()` (via `syncStaleDescendants` in
+ * `refresh.ts`), scoped to just the "old" story ids that received new
+ * comments this tick but weren't themselves re-inserted — that's the
+ * only case where the stored `descendants` on a story can drift, since
+ * shard-db never re-fetches an old item's own HN record. Page routes
+ * read `stories.descendants` directly and no longer call this at
+ * request time.
  *
  * Returns `null` on query failure — callers should keep each story's
  * existing stored `descendants` value as a fallback in that case. This is
@@ -60,21 +59,4 @@ export async function fetchLiveCommentCounts(
 		counts.set(key, n);
 	}
 	return counts;
-}
-
-/**
- * Overwrites each story's `descendants` with its live comment count.
- * Stories with zero live comments correctly become 0 (they're simply
- * absent from the aggregate's group-by rows). On aggregate failure,
- * stories are returned unmodified — the stale stored value is still
- * better than failing the whole page load.
- */
-export async function applyLiveCommentCounts<T extends { key: string; descendants?: number }>(
-	stories: T[],
-	deps: CommentCountsDeps = {}
-): Promise<T[]> {
-	if (stories.length === 0) return stories;
-	const counts = await fetchLiveCommentCounts(stories.map((s) => s.key), deps);
-	if (counts === null) return stories;
-	return stories.map((s) => ({ ...s, descendants: counts.get(s.key) ?? 0 }));
 }
