@@ -9,7 +9,7 @@
     "backfill-descendants": "bun run scripts/backfill-descendants.ts",
     "dev": "bun --bun vite dev",
     "build": "bun --bun vite build && bun run build:scripts && bun run build:copy-native",
-    "build:scripts": "bun build scripts/setup-schema.ts scripts/bulk-load.ts scripts/compact.ts --target=bun --outdir=build/scripts",
+    "build:scripts": "bun build scripts/setup-schema.ts scripts/bulk-load.ts scripts/compact.ts scripts/backfill-descendants.ts --target=bun --outdir=build/scripts",
     "build:copy-native": "mkdir -p build/node_modules && cp -rL node_modules/shard-db build/node_modules/ && (cp -r node_modules/node-gyp-build build/node_modules/ 2>/dev/null || cp -rL node_modules/shard-db/node_modules/node-gyp-build build/node_modules/)",
     "preview": "bun --bun vite preview",
     "prepare": "svelte-kit sync || echo ''",
