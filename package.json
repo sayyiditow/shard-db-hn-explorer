@@ -30,7 +30,7 @@
   },
   "dependencies": {
     "hyparquet": "^1.26.0",
-    "shard-db": "^1.0.9"
+    "shard-db": "^1.0.10"
   },
   "trustedDependencies": [
     "shard-db"
