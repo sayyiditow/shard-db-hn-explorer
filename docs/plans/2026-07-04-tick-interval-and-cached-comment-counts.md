@@ -309,4 +309,4 @@ Run with `bun test src/lib/hn/comment-counts.test.ts` first to confirm the new f
 2. `bun test` — paste the real output; every test must pass, including the new `comment-counts.test.ts` file and the untouched `refresh.test.ts` / `cache.test.ts` (these should be unaffected by either change — Task 1 only changes a constant `refresh.test.ts` doesn't assert on, Task 2 only changes `comment-counts.ts` which had no prior test file).
 3. Grep-confirm no other production call site of `fetchLiveCommentCounts` / `applyLiveCommentCounts` was missed: `grep -rn "LiveCommentCounts" src` should show exactly the 3 route files + `comment-counts.ts` + the new test file.
 
-Do not deploy as part of this plan — deployment (copy `build/` to the server, restart) is a separate, explicit step per the project's `CLAUDE.md` and is not implied by "plan approved."
+Do not deploy as part of this plan — deployment (copy `build/` to the server, restart) is a separate, explicit step per the project's `AGENTS.md` and is not implied by "plan approved."

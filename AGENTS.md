@@ -26,4 +26,4 @@ repo does **not** follow `CORE-PROCESS.md`'s Git Safety section:
 - **Co-author line(s):** commits get two lines — `Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>` for whichever Claude model planned/reviewed, plus `Co-Authored-By: DeepSeek <noreply@deepseek.com>` for the execution pass.
 - Build/deploy: `bun run build`, then copy `build/` to the server and
   restart the app (see the deployment convention in the sibling `shard-db`
-  repo's `CLAUDE.md` if this app depends on a shard-db instance).
+  repo's `AGENTS.md` if this app depends on a shard-db instance).
