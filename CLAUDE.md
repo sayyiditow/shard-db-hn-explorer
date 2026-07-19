@@ -1,19 +1,19 @@
 # shard-db-hn-explorer
 
-@docs/CORE-PROCESS.md
+@CORE-PROCESS.md
 
 ## Hard override for this repo — Git Safety does NOT apply here
 
 This is a showcase app: single maintainer, no collaborators, disposable/demo
 content, no production blast radius. By deliberate, explicit decision this
-repo does **not** follow `docs/CORE-PROCESS.md`'s Git Safety section:
+repo does **not** follow `CORE-PROCESS.md`'s Git Safety section:
 
 - No feature branches. Plans are executed **directly on `main`** and
   committed there.
 - No PRs. Do not tell the executing model to branch off `main` or open a
   PR — that's unnecessary process overhead for a single-maintainer
   showcase repo.
-- Everything else in `docs/CORE-PROCESS.md` (plan → approve → execute →
+- Everything else in `CORE-PROCESS.md` (plan → approve → execute →
   review, Definition of Done, "never weaken a test," review checklist)
   still applies as written.
 
