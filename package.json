@@ -18,19 +18,19 @@
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch"
   },
   "devDependencies": {
-    "@sveltejs/adapter-node": "^5.5.4",
-    "@sveltejs/kit": "^2.65.2",
-    "@sveltejs/vite-plugin-svelte": "^7.1.2",
+    "@sveltejs/adapter-node": "^5.5.7",
+    "@sveltejs/kit": "^2.70.2",
+    "@sveltejs/vite-plugin-svelte": "^7.2.0",
     "@types/bun": "^1.3.14",
-    "@types/node": "^25.9.3",
-    "svelte": "^5.56.3",
-    "svelte-check": "^4.6.0",
+    "@types/node": "^25.9.5",
+    "svelte": "^5.56.8",
+    "svelte-check": "^4.7.4",
     "typescript": "^6.0.3",
-    "vite": "^8.0.16"
+    "vite": "^8.2.0"
   },
   "dependencies": {
-    "hyparquet": "^1.26.0",
-    "shard-db": "^1.0.11"
+    "hyparquet": "^1.27.1",
+    "shard-db": "^1.0.12"
   },
   "trustedDependencies": [
     "shard-db"
