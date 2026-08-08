@@ -23,7 +23,7 @@ import {
 	parquetReadObjects,
 	byteLengthFromUrl
 } from 'hyparquet';
-import { shardDb, isError } from '../src/lib/shard-db/client';
+import { shardDb, isError, type IShardDbClient } from '../src/lib/shard-db/client';
 import { write as writeRefreshState, STATE_PATH as REFRESH_STATE_PATH } from '../src/lib/refresh-cache/state';
 import { truncateBytes } from '../src/lib/refresh-cache/truncate';
 import { INDEX_LISTS } from './lib/hn-schema';
@@ -127,22 +127,64 @@ function toMs(unixSec: bigint | number | undefined): number {
 
 
 
-async function bulkInsert(
+type BulkRecord = { key: string; value: Record<string, unknown> };
+interface BulkInsertStats {
+	inserted: number;
+	dropped: number;
+}
+
+const PARTIAL_INSERT_ERROR = 'some_records_dropped';
+
+async function insertBatch(
 	object: string,
-	records: { key: string; value: Record<string, unknown> }[]
-): Promise<void> {
+	records: BulkRecord[],
+	client: Pick<IShardDbClient, 'query'>,
+	log: (message: string) => void
+): Promise<BulkInsertStats> {
+	const result = await client.query({
+		mode: 'bulk-insert',
+		dir: 'hn',
+		object,
+		records
+	});
+	if (!isError(result)) return { inserted: records.length, dropped: 0 };
+	if (result.error !== PARTIAL_INSERT_ERROR) {
+		throw new Error(`bulk-insert ${object} failed: ${result.error}`);
+	}
+
+	if (records.length === 1) {
+		const record = records[0];
+		log(
+			`bulk-insert dropped record: object=${object} key=${record.key} ` +
+			`record=${JSON.stringify(record)} error=${result.error}`
+		);
+		return { inserted: 0, dropped: 1 };
+	}
+
+	const midpoint = Math.floor(records.length / 2);
+	const left = await insertBatch(object, records.slice(0, midpoint), client, log);
+	const right = await insertBatch(object, records.slice(midpoint), client, log);
+	return {
+		inserted: left.inserted + right.inserted,
+		dropped: left.dropped + right.dropped
+	};
+}
+
+export async function bulkInsert(
+	object: string,
+	records: BulkRecord[],
+	client: Pick<IShardDbClient, 'query'> = shardDb,
+	log: (message: string) => void = (message) => console.error(message)
+): Promise<BulkInsertStats> {
+	let inserted = 0;
+	let dropped = 0;
 	for (let off = 0; off < records.length; off += BULK_CHUNK) {
 		const chunk = records.slice(off, off + BULK_CHUNK);
-		const result = await shardDb.query({
-			mode: 'bulk-insert',
-			dir: 'hn',
-			object,
-			records: chunk
-		});
-		if (isError(result)) {
-			throw new Error(`bulk-insert ${object} failed: ${result.error}`);
-		}
+		const stats = await insertBatch(object, chunk, client, log);
+		inserted += stats.inserted;
+		dropped += stats.dropped;
 	}
+	return { inserted, dropped };
 }
 
 /**
@@ -219,7 +261,7 @@ function fmtCount(n: number): string {
 	return n.toLocaleString();
 }
 
-async function loadUsers(): Promise<number> {
+async function loadUsers(): Promise<BulkInsertStats> {
 	console.log('\nUsers — fetching users.parquet metadata...');
 	const byteLength = await byteLengthFromUrl(USERS_URL);
 	console.log(`  users.parquet: ${(byteLength / 1e6).toFixed(1)} MB`);
@@ -250,13 +292,23 @@ async function loadUsers(): Promise<number> {
 		}));
 
 	const t0 = performance.now();
-	await bulkInsert('users', records);
+	const stats = await bulkInsert('users', records);
 	const ms = performance.now() - t0;
-	console.log(`  inserted ${fmtCount(records.length)} users in ${(ms / 1000).toFixed(1)}s`);
-	return records.length;
+	console.log(
+		`  inserted ${fmtCount(stats.inserted)} users` +
+		(stats.dropped > 0 ? `, dropped ${fmtCount(stats.dropped)}` : '') +
+		` in ${(ms / 1000).toFixed(1)}s`
+	);
+	return stats;
 }
 
-async function loadItems(): Promise<{ stories: number; comments: number; maxId: number }> {
+async function loadItems(): Promise<{
+	stories: number;
+	comments: number;
+	droppedStories: number;
+	droppedComments: number;
+	maxId: number;
+}> {
 	console.log('\nItems — fetching items.parquet metadata...');
 	const byteLength = await byteLengthFromUrl(ITEMS_URL);
 	console.log(`  items.parquet: ${(byteLength / 1e9).toFixed(2)} GB`);
@@ -314,6 +366,8 @@ async function loadItems(): Promise<{ stories: number; comments: number; maxId: 
 	let comments: { key: string; value: Record<string, unknown> }[] = [];
 	let totalStories = 0;
 	let totalComments = 0;
+	let droppedStories = 0;
+	let droppedComments = 0;
 	let maxId = 0;
 
 	const flushIfFull = async (final: boolean): Promise<void> => {
@@ -321,13 +375,15 @@ async function loadItems(): Promise<{ stories: number; comments: number; maxId: 
 		if (have === 0) return;
 		if (!final && have < FLUSH_EVERY_ITEMS) return;
 		if (stories.length > 0) {
-			await bulkInsert('stories', stories);
-			totalStories += stories.length;
+			const stats = await bulkInsert('stories', stories);
+			totalStories += stats.inserted;
+			droppedStories += stats.dropped;
 			stories = [];
 		}
 		if (comments.length > 0) {
-			await bulkInsert('comments', comments);
-			totalComments += comments.length;
+			const stats = await bulkInsert('comments', comments);
+			totalComments += stats.inserted;
+			droppedComments += stats.dropped;
 			comments = [];
 		}
 	};
@@ -418,7 +474,13 @@ async function loadItems(): Promise<{ stories: number; comments: number; maxId: 
 	const readMs = performance.now() - t0;
 	console.log(`  items pipeline: ${(readMs / 1000).toFixed(1)}s total`);
 
-	return { stories: totalStories, comments: totalComments, maxId };
+	return {
+		stories: totalStories,
+		comments: totalComments,
+		droppedStories,
+		droppedComments,
+		maxId
+	};
 }
 
 async function main() {
@@ -444,8 +506,8 @@ async function main() {
 	await dropIndexes('users');
 
 	const totalStart = performance.now();
-	const userCount = await loadUsers();
-	const { stories, comments, maxId } = await loadItems();
+	const userStats = await loadUsers();
+	const { stories, comments, droppedStories, droppedComments, maxId } = await loadItems();
 	const insertMs = performance.now() - totalStart;
 	console.log(`\nInsert phase total: ${(insertMs / 1000).toFixed(1)}s`);
 
@@ -476,16 +538,18 @@ async function main() {
 	}
 
 	console.log('\nDone.');
-	console.log(`  Stories:   ${fmtCount(stories)}`);
-	console.log(`  Comments:  ${fmtCount(comments)}`);
-	console.log(`  Users:     ${fmtCount(userCount)}`);
+	console.log(`  Stories:   ${fmtCount(stories)} inserted, ${fmtCount(droppedStories)} dropped`);
+	console.log(`  Comments:  ${fmtCount(comments)} inserted, ${fmtCount(droppedComments)} dropped`);
+	console.log(`  Users:     ${fmtCount(userStats.inserted)} inserted, ${fmtCount(userStats.dropped)} dropped`);
 	console.log(`  Max ID:    ${fmtCount(maxId)}`);
 	console.log(`  Total:     ${(totalMs / 1000).toFixed(1)}s`);
 
 	shardDb.close();
 }
 
-main().catch((err) => {
-	console.error('\nbulk-load failed:', err);
-	process.exit(1);
-});
+if (import.meta.main) {
+	main().catch((err) => {
+		console.error('\nbulk-load failed:', err);
+		process.exit(1);
+	});
+}
