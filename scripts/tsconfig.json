@@ -1,0 +1,7 @@
+{
+	"extends": "../tsconfig.json",
+	"include": ["./*.ts", "./lib/**/*.ts"],
+	// Script tests use intentionally lightweight client doubles and are checked
+	// by Bun rather than this production-script typecheck project.
+	"exclude": ["./**/*.test.ts"]
+}
