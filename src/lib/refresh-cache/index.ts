@@ -1,14 +1,16 @@
 /** Refresh + cache module — see docs spec dated 2026-05-24.
  *
  *  Public API:
- *    start()                  — boot the refresh loop (idempotent); cadence
- *                                is REFRESH_INTERVAL_MINUTES (default 15)
+ *    start()                  — boot the ingest-drain and cache-refresh loops
+ *                                (idempotent); both use REFRESH_INTERVAL_MINUTES
+ *                                (default 15), but ingest drains batches without
+ *                                sleeping when it is behind
  *    getCached(key)           — read cached query result, or null on miss
  *    cachedQuery(payload)     — get-or-fetch-and-store (cache-on-success)
  *    canonicalKey(payload)    — derive the cache key for a shard-db query
  *    stats()                  — diagnostics (size, last-swap timestamp) */
 
-export { start, REFRESH_INTERVAL_MINUTES } from './refresh';
+export { runRefreshCycle, start, REFRESH_INTERVAL_MINUTES } from './refresh';
 export { get as getCached, stats } from './cache';
 export { canonicalKey, windowAnchor } from './keys';
 export { cachedQuery } from './cached-query';

@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeEach } from 'bun:test';
 import { unlinkSync, existsSync } from 'node:fs';
-import { tick, type TickDeps } from './refresh';
+import { runRefreshCycle, tick, type TickDeps } from './refresh';
 import { STATE_PATH, read, write } from './state';
 import * as cache from './cache';
 import type { HnItem } from './hn-api';
@@ -12,6 +12,7 @@ import type { HnItem } from './hn-api';
 function makeDeps(overrides: {
     getMaxItem?: () => Promise<number>;
     items?: HnItem[];
+    getItemsConcurrent?: (ids: number[], limit?: number) => Promise<HnItem[]>;
     parentLookups?: Record<string, { type?: string; story_root?: number }>;
     aggregateResponse?: unknown;
 } = {}): { deps: TickDeps; queries: Record<string, unknown>[] } {
@@ -43,7 +44,7 @@ function makeDeps(overrides: {
             api: {
                 getMaxItem: overrides.getMaxItem ?? (async () => 0),
                 getItem: async () => null,
-                getItemsConcurrent: async () => overrides.items ?? []
+                getItemsConcurrent: overrides.getItemsConcurrent ?? (async () => overrides.items ?? [])
             }
         }
     };
@@ -147,6 +148,73 @@ describe('refresh tick', () => {
         await tick(deps);
         // MAX_ITEMS_PER_TICK = 10_000; lastSeen advances 1000 → 11_000
         expect(await read()).toBe(11_000);
+    });
+
+    test('refresh run drains a large gap in back-to-back batches to one captured target', async () => {
+        await write(1_000);
+        const batchRanges: Array<[number, number]> = [];
+        let maxItemCalls = 0;
+        let maxItem = 25_005;
+        const { deps } = makeDeps({
+            getMaxItem: async () => {
+                maxItemCalls++;
+                return maxItem;
+            },
+            getItemsConcurrent: async (ids) => {
+                batchRanges.push([ids[0], ids[ids.length - 1]]);
+                // HN advances while the drain is running. The captured target
+                // must still bound this run.
+                maxItem = 50_000;
+                return [];
+            }
+        });
+
+        const result = await runRefreshCycle(deps);
+
+        expect(maxItemCalls).toBe(1);
+        expect(batchRanges).toEqual([
+            [1_001, 11_000],
+            [11_001, 21_000],
+            [21_001, 25_005]
+        ]);
+        expect(await read()).toBe(25_005);
+        expect(result.upserted.total).toBe(0);
+        expect(cache.stats().size).toBe(0);
+    });
+
+    test('refresh run uses one batch when the gap fits within the batch limit', async () => {
+        await write(1_000);
+        const batchRanges: Array<[number, number]> = [];
+        const { deps } = makeDeps({
+            getMaxItem: async () => 11_000,
+            getItemsConcurrent: async (ids) => {
+                batchRanges.push([ids[0], ids[ids.length - 1]]);
+                return [];
+            }
+        });
+
+        await runRefreshCycle(deps);
+
+        expect(batchRanges).toEqual([[1_001, 11_000]]);
+        expect(await read()).toBe(11_000);
+    });
+
+    test('refresh run stops on a batch fetch failure and leaves the checkpoint unchanged', async () => {
+        await write(1_000);
+        let fetchCalls = 0;
+        const { deps } = makeDeps({
+            getMaxItem: async () => 25_005,
+            getItemsConcurrent: async () => {
+                fetchCalls++;
+                throw new Error('network');
+            }
+        });
+
+        const result = await runRefreshCycle(deps);
+
+        expect(fetchCalls).toBe(1);
+        expect(await read()).toBe(1_000);
+        expect(result.error).toContain('item fetch failed: network');
     });
 
     test('small delta below MAX_ITEMS_PER_TICK advances state to maxItem', async () => {
