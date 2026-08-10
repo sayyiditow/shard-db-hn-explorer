@@ -11,6 +11,29 @@ export interface INativeShardDb {
 	setLogHandler?(fn: ((type: number, msg: string) => void) | null): void;
 }
 
+const WRITE_MODES = new Set([
+	'insert',
+	'update',
+	'bulk-insert',
+	'bulk-update',
+	'bulk-insert-delimited',
+	'bulk-update-delimited'
+]);
+
+function removeNul(value: unknown): unknown {
+	if (typeof value === 'string') return value.replaceAll('\u0000', '');
+	if (Array.isArray(value)) return value.map(removeNul);
+	if (value && typeof value === 'object') {
+		return Object.fromEntries(
+			Object.entries(value).map(([key, nested]) => [
+				key.replaceAll('\u0000', ''),
+				removeNul(nested)
+			])
+		);
+	}
+	return value;
+}
+
 // 1=error 2=warn 3=info 4=debug 5=audit 6=slow
 export class EmbeddedShardDbClient {
 	private db: INativeShardDb;
@@ -30,7 +53,10 @@ export class EmbeddedShardDbClient {
 	}
 
 	async query<T = unknown>(body: QueryBody): Promise<T | ShardDbError> {
-		const raw = await this.db.query(JSON.stringify(body));
+		const safeBody = WRITE_MODES.has(body.mode)
+			? removeNul(body) as QueryBody
+			: body;
+		const raw = await this.db.query(JSON.stringify(safeBody));
 		return typeof raw === 'string' ? JSON.parse(raw) as T | ShardDbError : raw as T | ShardDbError;
 	}
 

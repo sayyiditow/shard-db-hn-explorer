@@ -30,6 +30,67 @@ describe('EmbeddedShardDbClient', () => {
 		expect(result).toEqual({ title: 'hello' });
 	});
 
+	test('removes NULs recursively from write queries', async () => {
+		const { native, calls } = makeFakeNative({ insert: {} });
+		const client = new EmbeddedShardDbClient('', native);
+
+		await client.query({
+			mode: 'insert',
+			dir: 'hn',
+			object: 'stories',
+			key: '12\u000034',
+			value: {
+				title: 'hello\u0000world',
+				tags: ['a\u0000b', { nested: 'x\u0000y' }],
+				newline: 'keep\nthis'
+			}
+		});
+
+		expect(JSON.parse(calls[0])).toEqual({
+			mode: 'insert',
+			dir: 'hn',
+			object: 'stories',
+			key: '1234',
+			value: {
+				title: 'helloworld',
+				tags: ['ab', { nested: 'xy' }],
+				newline: 'keep\nthis'
+			}
+		});
+	});
+
+	test('sanitizes bulk record keys and values', async () => {
+		const { native, calls } = makeFakeNative({ 'bulk-insert': {} });
+		const client = new EmbeddedShardDbClient('', native);
+
+		await client.query({
+			mode: 'bulk-insert',
+			dir: 'hn',
+			object: 'users',
+			records: {
+				['user\u00001']: { about: 'bio\u0000text' }
+			}
+		});
+
+		expect(JSON.parse(calls[0]).records).toEqual({
+			user1: { about: 'biotext' }
+		});
+	});
+
+	test('leaves read queries unchanged', async () => {
+		const { native, calls } = makeFakeNative({ find: {} });
+		const client = new EmbeddedShardDbClient('', native);
+
+		await client.query({
+			mode: 'find',
+			dir: 'hn',
+			object: 'stories',
+			criteria: [{ field: 'title', op: 'contains', value: 'a\u0000b' }]
+		});
+
+		expect(JSON.parse(calls[0]).criteria[0].value).toBe('a\u0000b');
+	});
+
 	test('query() passes all body fields to native.query() as JSON', async () => {
 		const { native, calls } = makeFakeNative({});
 		const client = new EmbeddedShardDbClient('', native);
