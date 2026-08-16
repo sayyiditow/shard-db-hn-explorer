@@ -23,10 +23,10 @@ import {
 	parquetReadObjects,
 	byteLengthFromUrl
 } from 'hyparquet';
-import { shardDb, isError, type IShardDbClient } from '../src/lib/shard-db/client';
+import { shardDb } from '../src/lib/shard-db/client';
 import { write as writeRefreshState, STATE_PATH as REFRESH_STATE_PATH } from '../src/lib/refresh-cache/state';
 import { truncateBytes } from '../src/lib/refresh-cache/truncate';
-import { INDEX_LISTS } from './lib/hn-schema';
+import { bulkInsert, dropIndexes, addIndexes, truncate, loadUsers, n, toMs, fmtCount } from './lib/bulk-ops';
 
 // Field byte-budgets mirror scripts/setup-schema.ts and refresh.ts.
 // shard-db rejects inserts with varchar content > N bytes; we
@@ -35,20 +35,11 @@ const MAX_STORY_URL    = 512;
 const MAX_STORY_TITLE  = 128;
 const MAX_STORY_TEXT   = 4096;
 const MAX_COMMENT_TEXT = 4096;
-const MAX_USER_ABOUT   = 1024;
 
 const HF_BASE = 'https://huggingface.co/datasets/anantn/hacker-news/resolve/main';
 const ITEMS_URL = `${HF_BASE}/items.parquet`;
-const USERS_URL = `${HF_BASE}/users.parquet`;
 
 const BULK_TARGET = parseTarget(process.env.BULK_TARGET ?? '1000000');
-
-/* Rows per bulk-insert call. At full-HN scale (44M items) 100k-row
- * chunks give ~440 calls total. The C engine's internal thread pool
- * parallelises disk I/O within each call; larger chunks amortise the
- * per-call overhead (~50 MB per call at 500 B/row, well within the
- * 256 MB default query buffer). */
-const BULK_CHUNK = Number(process.env.BULK_CHUNK ?? 100_000);
 
 /* Items pipeline flushes stories + comments to shard-db every
    FLUSH_EVERY_ITEMS records read, so peak Bun heap stays bounded
@@ -74,14 +65,6 @@ interface ItemRow {
 	descendants?: bigint | number;
 	deleted?: boolean;
 	dead?: boolean;
-}
-
-interface UserRow {
-	id: string;
-	created?: bigint | number;
-	karma?: bigint | number;
-	about?: string;
-	submitted?: (bigint | number)[];
 }
 
 /* Item type codes for the compact typed-array itemMeta replacement.
@@ -112,194 +95,6 @@ function isStoryLike(code: number): boolean {
 function parseTarget(s: string): number {
 	const n = Number(s.replace(/_/g, ''));
 	return Number.isFinite(n) && n >= 0 ? n : 1_000_000;
-}
-
-function n(v: bigint | number | undefined): number {
-	if (v === undefined || v === null) return 0;
-	if (typeof v === 'bigint') return Number(v);
-	return v;
-}
-
-function toMs(unixSec: bigint | number | undefined): number {
-	const s = n(unixSec);
-	return s > 0 ? s * 1000 : 0;
-}
-
-
-
-type BulkRecord = { key: string; value: Record<string, unknown> };
-interface BulkInsertStats {
-	inserted: number;
-	dropped: number;
-}
-
-const PARTIAL_INSERT_ERROR = 'some_records_dropped';
-
-async function insertBatch(
-	object: string,
-	records: BulkRecord[],
-	client: Pick<IShardDbClient, 'query'>,
-	log: (message: string) => void
-): Promise<BulkInsertStats> {
-	const result = await client.query({
-		mode: 'bulk-insert',
-		dir: 'hn',
-		object,
-		records
-	});
-	if (!isError(result)) return { inserted: records.length, dropped: 0 };
-	if (result.error !== PARTIAL_INSERT_ERROR) {
-		throw new Error(`bulk-insert ${object} failed: ${result.error}`);
-	}
-
-	if (records.length === 1) {
-		const record = records[0];
-		log(
-			`bulk-insert dropped record: object=${object} key=${record.key} ` +
-			`record=${JSON.stringify(record)} error=${result.error}`
-		);
-		return { inserted: 0, dropped: 1 };
-	}
-
-	const midpoint = Math.floor(records.length / 2);
-	const left = await insertBatch(object, records.slice(0, midpoint), client, log);
-	const right = await insertBatch(object, records.slice(midpoint), client, log);
-	return {
-		inserted: left.inserted + right.inserted,
-		dropped: left.dropped + right.dropped
-	};
-}
-
-export async function bulkInsert(
-	object: string,
-	records: BulkRecord[],
-	client: Pick<IShardDbClient, 'query'> = shardDb,
-	log: (message: string) => void = (message) => console.error(message)
-): Promise<BulkInsertStats> {
-	let inserted = 0;
-	let dropped = 0;
-	for (let off = 0; off < records.length; off += BULK_CHUNK) {
-		const chunk = records.slice(off, off + BULK_CHUNK);
-		const stats = await insertBatch(object, chunk, client, log);
-		inserted += stats.inserted;
-		dropped += stats.dropped;
-	}
-	return { inserted, dropped };
-}
-
-/**
- * Strip every index off `object` so the subsequent bulk-insert pays
- * zero per-(field, shard) merge cost. The per-chunk insert rate stays
- * flat across the run instead of degrading O(R²) with chunk count
- * — proven against shard-db at 25M with the same R = ~25 we'll see
- * here at low-tens-of-millions and beyond. See docs/operations/
- * bulk-loading.md in shard-db for the crossover rule.
- *
- * Idempotent: indexes already missing are ignored by the server.
- */
-async function dropIndexes(object: string): Promise<void> {
-	const specs = INDEX_LISTS[object];
-	if (!specs || specs.length === 0) return;
-	// remove-index matches index.conf lines exactly — typed indexes are
-	// stored with their suffix (e.g. "title:trigram"), so the type must
-	// be preserved here, not stripped like indexFieldName used to do.
-	// Stripping meant this call silently dropped nothing for any typed
-	// index on every bulk-load run.
-	process.stdout.write(`  drop ${specs.length} indexes on hn/${object} ... `);
-	const resp = await shardDb.query({
-		mode: 'remove-index',
-		dir: 'hn',
-		object,
-		fields: specs
-	});
-	if (isError(resp)) {
-		// "no index" / "not found" is fine on first run or partial state
-		if (!/not found|no index|doesn't exist/i.test(resp.error)) {
-			throw new Error(`drop indexes on ${object}: ${resp.error}`);
-		}
-	}
-	console.log('ok');
-}
-
-/**
- * Build all indexes in ONE storage scan. The plural add-index form
- * (cmd_add_indexes server-side) accumulates entries for every listed
- * field during a single walk over the data shards — versus N separate
- * add-index calls which would each do their own full scan.
- *
- * Type suffixes (`title:trigram`, etc.) are preserved end-to-end; the
- * server reads them from the JSON array and writes them into
- * index.conf so the planner picks the right index type per op.
- */
-async function addIndexes(object: string): Promise<void> {
-	const specs = INDEX_LISTS[object];
-	if (!specs || specs.length === 0) return;
-	process.stdout.write(`  add ${specs.length} indexes on hn/${object} (one scan) ... `);
-	const t0 = performance.now();
-	const resp = await shardDb.query({
-		mode: 'add-index',
-		dir: 'hn',
-		object,
-		fields: specs
-	});
-	if (isError(resp)) throw new Error(`add indexes on ${object}: ${resp.error}`);
-	const ms = performance.now() - t0;
-	console.log(`${(ms / 1000).toFixed(1)}s`);
-}
-
-async function truncate(object: string): Promise<void> {
-	process.stdout.write(`  truncate hn/${object} ... `);
-	const resp = await shardDb.query({ mode: 'truncate', dir: 'hn', object });
-	if (isError(resp)) {
-		console.log(`FAILED: ${resp.error}`);
-		throw new Error(resp.error);
-	}
-	console.log('ok');
-}
-
-function fmtCount(n: number): string {
-	return n.toLocaleString();
-}
-
-async function loadUsers(): Promise<BulkInsertStats> {
-	console.log('\nUsers — fetching users.parquet metadata...');
-	const byteLength = await byteLengthFromUrl(USERS_URL);
-	console.log(`  users.parquet: ${(byteLength / 1e6).toFixed(1)} MB`);
-
-	const file = await asyncBufferFromUrl({ url: USERS_URL, byteLength });
-	const metadata = await parquetMetadataAsync(file);
-	const totalRows = Number(metadata.num_rows);
-	console.log(`  ${fmtCount(totalRows)} rows in users.parquet`);
-
-	const allRows = (await parquetReadObjects({
-		file,
-		metadata,
-		columns: ['id', 'created', 'karma', 'about', 'submitted']
-	})) as unknown as UserRow[];
-
-	console.log(`  parsed ${fmtCount(allRows.length)} users, bulk-inserting ...`);
-
-	const records = allRows
-		.filter((u) => u.id && typeof u.id === 'string')
-		.map((u) => ({
-			key: u.id,
-			value: {
-				karma: n(u.karma),
-				created: toMs(u.created),
-				about: truncateBytes(u.about ?? '', MAX_USER_ABOUT),
-				submitted_count: Array.isArray(u.submitted) ? u.submitted.length : 0
-			}
-		}));
-
-	const t0 = performance.now();
-	const stats = await bulkInsert('users', records);
-	const ms = performance.now() - t0;
-	console.log(
-		`  inserted ${fmtCount(stats.inserted)} users` +
-		(stats.dropped > 0 ? `, dropped ${fmtCount(stats.dropped)}` : '') +
-		` in ${(ms / 1000).toFixed(1)}s`
-	);
-	return stats;
 }
 
 async function loadItems(): Promise<{

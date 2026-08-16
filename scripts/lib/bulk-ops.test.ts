@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { bulkInsert } from './bulk-load';
+import { bulkInsert } from './bulk-ops';
 
 describe('bulkInsert', () => {
 	test('continues after isolating a dropped record and logs its details', async () => {
