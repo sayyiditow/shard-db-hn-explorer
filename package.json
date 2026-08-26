@@ -9,9 +9,9 @@
     "reload-users": "bun run scripts/reload-users.ts",
     "backfill-descendants": "bun run scripts/backfill-descendants.ts",
     "dev": "bun --bun vite dev",
-    "build": "bun --bun vite build && bun run build:scripts && bun run build:copy-native",
+    "build": "bun --bun vite build && bun run build:scripts && bun run build:bundle",
     "build:scripts": "bun build scripts/setup-schema.ts scripts/bulk-load.ts scripts/compact.ts scripts/backfill-descendants.ts scripts/reload-users.ts --target=bun --external shard-db --outdir=build/scripts",
-    "build:copy-native": "mkdir -p build/node_modules && cp -rL node_modules/shard-db build/node_modules/ && (cp -r node_modules/node-gyp-build build/node_modules/ 2>/dev/null || cp -rL node_modules/shard-db/node_modules/node-gyp-build build/node_modules/)",
+    "build:bundle": "bun build build/index.js --target=bun --outdir build --external shard-db --external node-gyp-build && rm -rf build/server build/env.js build/handler.js && mkdir -p build/node_modules && cp -rL node_modules/shard-db node_modules/node-gyp-build build/node_modules/",
     "preview": "bun --bun vite preview",
     "prepare": "svelte-kit sync || echo ''",
     "test": "bun test",
@@ -19,19 +19,19 @@
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch"
   },
   "devDependencies": {
-    "@sveltejs/adapter-node": "^5.5.7",
-    "@sveltejs/kit": "^2.70.2",
+    "@sveltejs/kit": "^2.70.3",
     "@sveltejs/vite-plugin-svelte": "^7.3.0",
-    "@types/bun": "^1.3.14",
+    "@types/bun": "^1.4.0",
     "@types/node": "^25.9.5",
-    "svelte": "^5.56.9",
+    "svelte": "^5.56.10",
+    "svelte-adapter-bun": "^1.0.1",
     "svelte-check": "^4.7.6",
     "typescript": "^6.0.3",
-    "vite": "^8.2.1"
+    "vite": "^8.2.2"
   },
   "dependencies": {
-    "hyparquet": "^1.28.2",
-    "shard-db": "^1.0.17"
+    "hyparquet": "^1.29.2",
+    "shard-db": "^1.0.18"
   },
   "trustedDependencies": [
     "shard-db"

@@ -1,4 +1,4 @@
-import adapter from '@sveltejs/adapter-node';
+import adapter from 'svelte-adapter-bun';
 
 /** @type {import('@sveltejs/kit').Config} */
 const config = {
@@ -6,8 +6,8 @@ const config = {
 		runes: ({ filename }) => (filename.split(/[/\\]/).includes('node_modules') ? undefined : true)
 	},
 	kit: {
-		// adapter-node — Hetzner VPS deployment, behind Caddy.
-		// Bun runs the built server.js directly via `bun ./build`.
+		// svelte-adapter-bun — Hetzner VPS deployment, behind Caddy.
+		// Bun runs the built entry directly via `bun ./build/index.js`.
 		adapter: adapter()
 	}
 };
